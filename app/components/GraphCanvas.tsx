@@ -190,32 +190,54 @@ export function GraphCanvas({
   }, [focusedNode, data.positions]);
 
   return (
-    <div ref={containerRef} className="w-full h-full relative">
+    <div ref={containerRef} className="w-full h-full relative bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Legend */}
-      <div className="absolute top-4 left-4 bg-gray-900/90 p-3 rounded-lg border border-gray-700 text-xs">
-        <div className="text-gray-400 mb-2">Legend</div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-3 h-3 rounded-full bg-yellow-500 border-2 border-yellow-300" />
-          <span className="text-gray-300">Seed Node</span>
+      <div className="absolute top-4 left-4 glass rounded-xl p-4 text-xs z-10">
+        <div className="text-white font-semibold mb-3 flex items-center gap-2">
+          <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Legend
         </div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-3 h-3 rounded-full bg-cyan-500" />
-          <span className="text-gray-300">Regular Node</span>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-4 h-4 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 border-2 border-white/50 shadow-lg shadow-yellow-500/30" />
+          <span className="text-slate-300">Seed Node</span>
+        </div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-4 h-4 rounded-full bg-gradient-to-br from-cyan-400 to-purple-500 shadow-lg shadow-cyan-500/20" />
+          <span className="text-slate-300">Regular Node</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-6 h-0.5 bg-yellow-500" />
-          <span className="text-gray-300">Shortest Path</span>
+          <div className="w-8 h-1 bg-gradient-to-r from-cyan-400 to-purple-500 rounded-full shadow-lg shadow-cyan-500/30" />
+          <span className="text-slate-300">Shortest Path</span>
         </div>
       </div>
 
       {/* Instructions */}
-      <div className="absolute bottom-4 left-4 bg-gray-900/90 p-3 rounded-lg border border-gray-700 text-xs">
-        <div className="text-gray-400 mb-2">Controls</div>
-        <div className="text-gray-300 space-y-1">
-          <p>• Click node: View details</p>
-          <p>• Click two nodes: Find shortest path</p>
-          <p>• Scroll: Zoom in/out</p>
-          <p>• Drag: Pan view</p>
+      <div className="absolute bottom-4 left-4 glass rounded-xl p-4 text-xs z-10">
+        <div className="text-white font-semibold mb-3 flex items-center gap-2">
+          <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+          </svg>
+          Controls
+        </div>
+        <div className="text-slate-400 space-y-1.5">
+          <p className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+            Click node: View details
+          </p>
+          <p className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+            Click two nodes: Find shortest path
+          </p>
+          <p className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-pink-400" />
+            Scroll: Zoom in/out
+          </p>
+          <p className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+            Drag: Pan view
+          </p>
         </div>
       </div>
 

@@ -2,12 +2,33 @@ import Graph from 'graphology';
 import { getPageLinks, titleToUrl } from './wikipedia';
 import type { WikiNode, WikiEdge } from '@/types/graph';
 
+const CONCURRENCY = 8;
+const MAX_REQUEST_BUDGET = 500;
+
 interface CrawlProgress {
   nodes: WikiNode[];
   edges: WikiEdge[];
+  edgeKeys: Set<string>;
   visited: Set<string>;
   queue: { title: string; depth: number }[];
   resolvedTitles: Map<string, string>;
+}
+
+export function getCrawlRequestBudget(maxNodes: number, depth: number): number {
+  const requestedDepthFactor = Math.min(Math.max(depth, 1), 3);
+  const rawBudget = Math.max(maxNodes * 8, 200) * requestedDepthFactor;
+  return Math.min(Math.max(rawBudget, 200), MAX_REQUEST_BUDGET);
+}
+
+export function shouldQueuePage(
+  title: string,
+  visited: Set<string>,
+  queued: Set<string> = new Set()
+): boolean {
+  const normalized = normalizeTitle(title);
+  if (!normalized) return false;
+  if (visited.has(normalized) || queued.has(normalized)) return false;
+  return true;
 }
 
 function normalizeTitle(title: string): string {
@@ -34,116 +55,158 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   seedId: string;
 }> {
   const { seedTitle, depth, maxNodes, onProgress } = options;
-  
+
+  const requestBudget = getCrawlRequestBudget(maxNodes, depth);
+  const pageLinkLimit = Math.min(300, Math.max(120, maxNodes));
+
   const progress: CrawlProgress = {
     nodes: [],
     edges: [],
+    edgeKeys: new Set<string>(),
     visited: new Set(),
     queue: [],
     resolvedTitles: new Map(),
   };
 
+  const queuedTitles = new Set<string>();
+
   // Start with the seed page
-  progress.queue.push({ title: normalizeTitle(seedTitle), depth: 0 });
-  
+  const seedNormalized = normalizeTitle(seedTitle);
+  progress.queue.push({ title: seedNormalized, depth: 0 });
+  queuedTitles.add(seedNormalized);
+
   let visited = 0;
+  let requestsUsed = 0;
 
-  while (progress.queue.length > 0 && progress.nodes.length < maxNodes) {
-    const { title, depth: currentDepth } = progress.queue.shift()!;
-    const canonicalTitle = getCanonicalTitle(title, progress.resolvedTitles);
+  while (progress.queue.length > 0 && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
+    const batchSize = Math.min(CONCURRENCY, progress.queue.length, requestBudget - requestsUsed);
+    const batch = progress.queue.splice(0, batchSize);
+    if (batch.length === 0) break;
 
-    // Skip if already visited (using canonical title)
-    if (progress.visited.has(canonicalTitle)) {
-      continue;
-    }
-
-    progress.visited.add(canonicalTitle);
-    visited++;
-
-    if (onProgress) {
-      onProgress(visited, progress.nodes.length);
-    }
-
-    // Fetch links from this page
-    const result = await getPageLinks(title);
-    
-    // Store the resolved title mapping
-    if (result.resolvedTitle !== normalizeTitle(title)) {
-      progress.resolvedTitles.set(normalizeTitle(title), result.resolvedTitle);
-    }
-
-    const links = result.links.slice(0, maxNodes - progress.nodes.length);
-    
-    // Add node
-    const nodeId = getCanonicalTitle(title, progress.resolvedTitles);
-    progress.nodes.push({
-      id: nodeId,
-      title: nodeId,
-      url: titleToUrl(nodeId),
-      extract: '',
-      depth: currentDepth,
-      inDegree: 0,
-      outDegree: links.length,
-      pagerank: 0,
-      betweenness: 0,
-      communityId: 0,
-    });
-    
-    // Store nodeId to avoid issues with getCanonicalTitle returning undefined
-    void nodeId; // Mark as intentionally unused here
-
-    // Add edges and queue new pages
-    if (currentDepth < depth) {
-      for (const link of links) {
-        const normalizedLink = normalizeTitle(link);
-        const canonicalLink = getCanonicalTitle(normalizedLink, progress.resolvedTitles);
-        
-        // Add edge (avoid duplicates)
-        const edgeKey = `${nodeId}|${canonicalLink}`;
-        if (!progress.edges.some(e => e.source === nodeId && e.target === canonicalLink)) {
-          progress.edges.push({
-            source: nodeId,
-            target: canonicalLink,
-          });
+    const batchResults = await Promise.all(
+      batch.map(async ({ title, depth: currentDepth }) => {
+        const canonicalTitle = getCanonicalTitle(title, progress.resolvedTitles);
+        if (progress.visited.has(canonicalTitle)) {
+          return null;
         }
 
-        // Queue if not visited
-        if (!progress.visited.has(canonicalLink) && progress.nodes.length < maxNodes) {
-          // Check if already in queue
-          if (!progress.queue.some(q => normalizeTitle(q.title) === normalizedLink)) {
-            progress.queue.push({ title: normalizedLink, depth: currentDepth + 1 });
-          }
+        try {
+          const result = await getPageLinks(title);
+          requestsUsed += 1;
+          return { title, currentDepth, result, canonicalTitle };
+        } catch {
+          return null;
         }
+      })
+    );
+
+    for (const item of batchResults) {
+      if (!item) continue;
+
+      const { title, currentDepth, result, canonicalTitle } = item;
+      if (progress.visited.has(canonicalTitle)) {
+        continue;
       }
-    }
 
-    // Handle pagination
-    if (result.continueToken && currentDepth < depth && progress.nodes.length < maxNodes) {
-      // Continue fetching from this page with pagination
-      let continueToken: string | undefined = result.continueToken;
-      while (continueToken && progress.nodes.length < maxNodes) {
-        const paginatedResult = await getPageLinks(title, continueToken);
-        const paginatedLinks = paginatedResult.links.slice(0, maxNodes - progress.nodes.length);
-        
-        for (const link of paginatedLinks) {
+      progress.visited.add(canonicalTitle);
+      visited++;
+
+      if (onProgress) {
+        onProgress(visited, Math.max(progress.nodes.length, 1));
+      }
+
+      if (result.resolvedTitle !== normalizeTitle(title)) {
+        progress.resolvedTitles.set(normalizeTitle(title), result.resolvedTitle);
+      }
+
+      const links = result.links.slice(0, Math.min(pageLinkLimit, result.links.length));
+      const nodeId = getCanonicalTitle(title, progress.resolvedTitles);
+
+      const existingNode = progress.nodes.find((node) => node.id === nodeId);
+      if (!existingNode) {
+        progress.nodes.push({
+          id: nodeId,
+          title: nodeId,
+          url: titleToUrl(nodeId),
+          extract: '',
+          depth: currentDepth,
+          inDegree: 0,
+          outDegree: links.length,
+          pagerank: 0,
+          betweenness: 0,
+          communityId: 0,
+        });
+      }
+
+      if (currentDepth < depth) {
+        for (const link of links) {
           const normalizedLink = normalizeTitle(link);
           const canonicalLink = getCanonicalTitle(normalizedLink, progress.resolvedTitles);
-          
-          if (!progress.edges.some(e => e.source === nodeId && e.target === canonicalLink)) {
+
+          const edgeKey = `${nodeId}|${canonicalLink}`;
+          if (!progress.edgeKeys.has(edgeKey)) {
+            progress.edgeKeys.add(edgeKey);
             progress.edges.push({
               source: nodeId,
               target: canonicalLink,
             });
           }
 
-          if (!progress.visited.has(canonicalLink) && progress.nodes.length < maxNodes) {
-            if (!progress.queue.some(q => normalizeTitle(q.title) === normalizedLink)) {
-              progress.queue.push({ title: normalizedLink, depth: currentDepth + 1 });
-            }
+          if (
+            !progress.visited.has(canonicalLink) &&
+            progress.nodes.length < maxNodes &&
+            shouldQueuePage(normalizedLink, progress.visited, queuedTitles)
+          ) {
+            progress.queue.push({ title: normalizedLink, depth: currentDepth + 1 });
+            queuedTitles.add(normalizedLink);
           }
         }
-        
-        continueToken = paginatedResult.continueToken || undefined;
+      }
+
+      if (result.continueToken && currentDepth < depth && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
+        let continueToken: string | undefined = result.continueToken;
+        let collectedLinks = links.length;
+
+        while (
+          continueToken &&
+          progress.nodes.length < maxNodes &&
+          requestsUsed < requestBudget &&
+          collectedLinks < pageLinkLimit
+        ) {
+          try {
+            const paginatedResult = await getPageLinks(title, continueToken);
+            requestsUsed += 1;
+            const paginatedLinks = paginatedResult.links.slice(0, Math.min(pageLinkLimit - collectedLinks, paginatedResult.links.length));
+
+            for (const link of paginatedLinks) {
+              const normalizedLink = normalizeTitle(link);
+              const canonicalLink = getCanonicalTitle(normalizedLink, progress.resolvedTitles);
+
+              const edgeKey = `${nodeId}|${canonicalLink}`;
+              if (!progress.edgeKeys.has(edgeKey)) {
+                progress.edgeKeys.add(edgeKey);
+                progress.edges.push({
+                  source: nodeId,
+                  target: canonicalLink,
+                });
+              }
+
+              if (
+                !progress.visited.has(canonicalLink) &&
+                progress.nodes.length < maxNodes &&
+                shouldQueuePage(normalizedLink, progress.visited, queuedTitles)
+              ) {
+                progress.queue.push({ title: normalizedLink, depth: currentDepth + 1 });
+                queuedTitles.add(normalizedLink);
+              }
+            }
+
+            collectedLinks += paginatedLinks.length;
+            continueToken = paginatedResult.continueToken || undefined;
+          } catch {
+            break;
+          }
+        }
       }
     }
   }
@@ -198,6 +261,7 @@ export function buildGraph(nodes: WikiNode[], edges: WikiEdge[]): Graph {
       graph.addNode(node.id, {
         title: node.title,
         url: node.url,
+        extract: node.extract,
         depth: node.depth,
         pagerank: node.pagerank,
         betweenness: node.betweenness,

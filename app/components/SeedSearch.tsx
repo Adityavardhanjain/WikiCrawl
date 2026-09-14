@@ -16,12 +16,27 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<NodeJS.Timeout>();
+  const requestIdRef = useRef(0);
+  const cacheRef = useRef<Map<string, SearchResult[]>>(new Map());
 
   useEffect(() => {
-    if (query.length < 2) {
+    const trimmed = query.trim();
+
+    if (trimmed.length < 2) {
       setSuggestions([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const cacheKey = trimmed.toLowerCase();
+    const cached = cacheRef.current.get(cacheKey);
+    if (cached) {
+      setSuggestions(cached);
+      setShowSuggestions(true);
+      setIsSearching(false);
       return;
     }
 
@@ -29,18 +44,43 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
       clearTimeout(debounceRef.current);
     }
 
+    const requestId = ++requestIdRef.current;
+    setIsSearching(true);
     debounceRef.current = setTimeout(async () => {
       try {
+        const controller = new AbortController();
         const response = await fetch(
-          `/api/wikipedia/search?q=${encodeURIComponent(query)}`
+          `/api/wikipedia/search?q=${encodeURIComponent(trimmed)}`,
+          { signal: controller.signal }
         );
-        const data = await response.json();
-        setSuggestions(data);
+
+        if (!response.ok) {
+          if (response.status === 429) {
+            if (requestId === requestIdRef.current) {
+              setSuggestions([]);
+              setIsSearching(false);
+            }
+            return;
+          }
+
+          throw new Error(`Search failed: ${response.status}`);
+        }
+
+        const data = await response.json() as SearchResult[];
+        if (requestId === requestIdRef.current) {
+          cacheRef.current.set(cacheKey, data);
+          setSuggestions(data);
+          setIsSearching(false);
+        }
       } catch (error) {
+        if ((error as Error).name === 'AbortError') return;
         console.error('Search error:', error);
-        setSuggestions([]);
+        if (requestId === requestIdRef.current) {
+          setSuggestions([]);
+          setIsSearching(false);
+        }
       }
-    }, 300);
+    }, 100);
 
     return () => {
       if (debounceRef.current) {
@@ -117,25 +157,36 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
           {/* Glow effect on focus */}
           <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-cyan-500/10 via-purple-500/10 to-pink-500/10 opacity-0 focus-within:opacity-100 transition-opacity pointer-events-none" />
           
-          {showSuggestions && suggestions.length > 0 && (
-            <ul className="absolute z-50 w-full mt-2 glass-strong rounded-xl shadow-2xl overflow-hidden border border-white/10">
-              {suggestions.map((suggestion, index) => (
-                <li key={suggestion.title}>
-                  <button
-                    type="button"
-                    onClick={() => handleSelect(suggestion.title)}
-                    className={`w-full px-4 py-3 text-left text-white hover:bg-gradient-to-r hover:from-cyan-500/20 hover:to-purple-500/20 transition-all flex items-center gap-3 ${
-                      index === selectedIndex ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20' : ''
-                    }`}
-                  >
-                    <svg className="w-4 h-4 text-cyan-400/60 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <span className="truncate">{suggestion.title}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+          {showSuggestions && (
+            <div className="absolute z-50 w-full mt-2 glass-strong rounded-xl shadow-2xl overflow-hidden border border-white/10">
+              {isSearching && (
+                <div className="flex items-center gap-3 px-4 py-3 text-sm text-cyan-300">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+                  Searching...
+                </div>
+              )}
+
+              {!isSearching && suggestions.length > 0 && (
+                <ul>
+                  {suggestions.map((suggestion, index) => (
+                    <li key={suggestion.title}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelect(suggestion.title)}
+                        className={`w-full px-4 py-3 text-left text-white hover:bg-gradient-to-r hover:from-cyan-500/20 hover:to-purple-500/20 transition-all flex items-center gap-3 ${
+                          index === selectedIndex ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20' : ''
+                        }`}
+                      >
+                        <svg className="w-4 h-4 text-cyan-400/60 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span className="truncate">{suggestion.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
         

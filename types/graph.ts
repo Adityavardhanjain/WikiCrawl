@@ -31,6 +31,10 @@ export interface CrawlResult {
   communities: Community[];
   crawledAt: string;
   positions: { [key: string]: { x: number; y: number } };
+  progress?: {
+    visited: number;
+    total: number;
+  };
 }
 
 export interface SearchResult {
@@ -48,4 +52,5 @@ export interface CrawlRequest {
   seedTitle: string;
   depth: number;
   maxNodes: number;
+  baseGraph?: CrawlResult;
 }

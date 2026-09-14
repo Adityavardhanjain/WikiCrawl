@@ -30,15 +30,8 @@ function getDb(): Database.Database {
 }
 
 export function generateCacheKey(seedTitle: string, depth: number, maxNodes: number): string {
-  // Simple hash function for the cache key
-  const input = `${seedTitle.toLowerCase()}|${depth}|${maxNodes}`;
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    const char = input.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return Math.abs(hash).toString(36);
+  const normalized = seedTitle.replace(/_/g, ' ').trim().toLowerCase();
+  return `${normalized}|${depth}|${maxNodes}`;
 }
 
 export function getCachedResult(cacheKey: string): CrawlResult | null {
@@ -83,31 +76,3 @@ export function setCachedResult(
   }
 }
 
-export function getCachedBySeed(seedTitle: string, depth: number, maxNodes: number): CrawlResult | null {
-  try {
-    const database = getDb();
-    const row = database.prepare(`
-      SELECT result FROM crawl_cache 
-      WHERE seed_title = ? AND depth = ? AND max_nodes = ?
-      ORDER BY created_at DESC
-      LIMIT 1
-    `).get(seedTitle, depth, maxNodes) as { result: string } | undefined;
-    
-    if (row) {
-      return JSON.parse(row.result) as CrawlResult;
-    }
-    return null;
-  } catch (error) {
-    console.error('Error reading from cache:', error);
-    return null;
-  }
-}
-
-export function clearCache(): void {
-  try {
-    const database = getDb();
-    database.exec('DELETE FROM crawl_cache');
-  } catch (error) {
-    console.error('Error clearing cache:', error);
-  }
-}

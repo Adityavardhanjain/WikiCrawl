@@ -29,8 +29,12 @@ export function GraphCanvas({
   const sigmaRef = useRef<Sigma | null>(null);
   const [hoveredNode, setHoveredNode] = useState<WikiNode | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
-  const [firstSelectedNode, setFirstSelectedNode] = useState<string | null>(null);
-  const [maxDepth, setMaxDepth] = useState(1);
+  const firstSelectedNodeRef = useRef<string | null>(null);
+
+  const maxDepth = useMemo(() => {
+    const depths = data.nodes.map(n => n.depth).filter(d => d >= 0);
+    return Math.max(...depths, 1);
+  }, [data.nodes]);
 
   // Build graph from data
   const graph = useMemo(() => {
@@ -69,12 +73,6 @@ export function GraphCanvas({
     return g;
   }, [data, colorMode, maxDepth]);
 
-  // Calculate max depth
-  useEffect(() => {
-    const depths = data.nodes.map(n => n.depth).filter(d => d >= 0);
-    setMaxDepth(Math.max(...depths, 1));
-  }, [data.nodes]);
-
   // Initialize Sigma
   useEffect(() => {
     if (!containerRef.current || sigmaRef.current) return;
@@ -88,6 +86,9 @@ export function GraphCanvas({
       defaultNodeColor: '#4ECDC4',
       minCameraRatio: 0.5,
       maxCameraRatio: 2,
+      hideLabelsOnMove: true,
+      hideEdgesOnMove: true,
+      labelRenderedSizeThreshold: 8,
     });
 
     sigmaRef.current = sigma;
@@ -106,15 +107,16 @@ export function GraphCanvas({
 
     sigma.on('clickNode', ({ node }) => {
       const nodeData = graph.getNodeAttributes(node).raw as WikiNode;
+      const currentFirstSelectedNode = firstSelectedNodeRef.current;
       
-      if (firstSelectedNode && firstSelectedNode !== node) {
+      if (currentFirstSelectedNode && currentFirstSelectedNode !== node) {
         // Second click - find path
-        onPathSelect(firstSelectedNode, node);
-        setFirstSelectedNode(null);
+        onPathSelect(currentFirstSelectedNode, node);
+        firstSelectedNodeRef.current = null;
       } else {
         // First click
         onNodeClick(nodeData);
-        setFirstSelectedNode(node);
+        firstSelectedNodeRef.current = node;
       }
     });
 
@@ -134,7 +136,7 @@ export function GraphCanvas({
       sigma.kill();
       sigmaRef.current = null;
     };
-  }, [graph, onNodeClick, onPathSelect, firstSelectedNode]);
+  }, [graph, onNodeClick, onPathSelect]);
 
   // Update colors when colorMode changes
   useEffect(() => {
@@ -184,8 +186,7 @@ export function GraphCanvas({
     const pos = data.positions[focusedNode];
     
     if (pos) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (camera as any).animate(pos.x, pos.y, { duration: 300 });
+      camera.animate({ x: pos.x, y: pos.y }, { duration: 300 });
     }
   }, [focusedNode, data.positions]);
 

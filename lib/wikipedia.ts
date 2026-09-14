@@ -1,5 +1,22 @@
 const WIKIPEDIA_API_BASE = 'https://en.wikipedia.org/w/api.php';
-const USER_AGENT = 'WikiCrawl/1.0 (Internet Rabbit Hole Generator; contact@example.com)';
+const USER_AGENT = 'WikiCrawl/1.0 (https://github.com; contact@example.com)';
+const MAX_RETRIES = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryDelay(response: Response, attempt: number): number {
+  const retryAfterHeader = response.headers.get('retry-after');
+  if (retryAfterHeader) {
+    const retryAfterSeconds = Number(retryAfterHeader);
+    if (!Number.isNaN(retryAfterSeconds) && retryAfterSeconds > 0) {
+      return retryAfterSeconds * 1000;
+    }
+  }
+
+  return Math.min(2000 * 2 ** attempt, 10000);
+}
 
 interface WikipediaLink {
   title: string;
@@ -35,22 +52,39 @@ async function fetchWikipedia(params: Record<string, string>): Promise<Wikipedia
   const url = new URL(WIKIPEDIA_API_BASE);
   url.searchParams.set('format', 'json');
   url.searchParams.set('origin', '*');
-  
+
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      'User-Agent': USER_AGENT,
-    },
-  });
+  let attempt = 0;
 
-  if (!response.ok) {
-    throw new Error(`Wikipedia API error: ${response.status}`);
+  while (attempt <= MAX_RETRIES) {
+    const response = await fetch(url.toString(), {
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json',
+      },
+    });
+
+    if (response.status === 429) {
+      if (attempt >= MAX_RETRIES) {
+        throw new Error('Wikipedia is rate limiting requests. Please wait a moment and try again.');
+      }
+
+      await sleep(getRetryDelay(response, attempt));
+      attempt += 1;
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Wikipedia API error: ${response.status}`);
+    }
+
+    return response.json();
   }
 
-  return response.json();
+  throw new Error('Wikipedia request failed after retries');
 }
 
 export async function searchWikipedia(query: string): Promise<WikipediaSearchResult[]> {

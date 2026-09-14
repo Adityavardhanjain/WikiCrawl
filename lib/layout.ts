@@ -23,20 +23,33 @@ export function computeLayout(
   graph: Graph,
   options: LayoutOptions = {}
 ): { [key: string]: { x: number; y: number } } {
-  const { iterations = 100, settings = {} } = options;
-  
-  // Run ForceAtlas2
+  const nodeCount = graph.order;
+  const { iterations = Math.min(100, Math.max(40, 120 - nodeCount / 3)), settings = {} } = options;
+
   const layoutSettings = { ...DEFAULT_SETTINGS, ...settings };
-  
-  // Initialize positions if not present
+
+  if (nodeCount === 0) {
+    return {};
+  }
+
+  if (nodeCount <= 20) {
+    const positions: { [key: string]: { x: number; y: number } } = {};
+    graph.forEachNode((node) => {
+      positions[node] = {
+        x: Math.random() * 800,
+        y: Math.random() * 600,
+      };
+    });
+    return positions;
+  }
+
   graph.forEachNode((node) => {
     if (!graph.getNodeAttribute(node, 'x')) {
       graph.setNodeAttribute(node, 'x', Math.random() * 1000);
       graph.setNodeAttribute(node, 'y', Math.random() * 800);
     }
   });
-  
-  // Run ForceAtlas2 - it modifies the graph in place
+
   forceAtlas2.assign(graph, {
     iterations,
     settings: layoutSettings,

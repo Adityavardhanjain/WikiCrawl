@@ -24,6 +24,52 @@ const GraphCanvas = dynamic(
 
 type ColorMode = 'community' | 'depth';
 
+async function readCrawlResponse(
+  response: Response,
+  onProgress?: (visited: number, total: number) => void
+): Promise<CrawlResult> {
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || 'Failed to crawl');
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/event-stream')) {
+    return response.json() as Promise<CrawlResult>;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('Missing response stream');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: CrawlResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split('\n\n');
+    buffer = chunks.pop() ?? '';
+
+    for (const chunk of chunks) {
+      const dataLine = chunk.split('\n').find((line) => line.startsWith('data:'));
+      if (!dataLine) continue;
+
+      const payload = JSON.parse(dataLine.slice(5).trim());
+      if (payload?.progress && onProgress) {
+        onProgress(payload.progress.visited, payload.progress.total);
+      }
+      if (payload?.result) finalResult = payload.result as CrawlResult;
+      if (payload?.error) throw new Error(payload.error);
+    }
+  }
+
+  if (!finalResult) throw new Error('Crawl stream ended without a final result');
+  return finalResult;
+}
+
 // Animated background particles
 function AnimatedBackground() {
   const particles = useMemo(() => {
@@ -70,7 +116,14 @@ export default function Home() {
   const [selectedNode, setSelectedNode] = useState<WikiNode | null>(null);
   const [selectedPath, setSelectedPath] = useState<string[] | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
-  
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
+  const updateLoadingProgress = useCallback((visited: number, total: number) => {
+    const safeTotal = Math.max(total, 1);
+    const percent = Math.min(95, Math.round((visited / safeTotal) * 100));
+    setLoadingProgress(percent);
+  }, []);
+
   // Query for crawl data
   const { data, isLoading, error, refetch } = useQuery<CrawlResult>({
     queryKey: ['crawl', seedTitle, depth, maxNodes],
@@ -80,17 +133,23 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ seedTitle, depth, maxNodes }),
       });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to crawl');
-      }
-      
-      return response.json();
+      return readCrawlResponse(response, updateLoadingProgress);
     },
     enabled: false,
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
+
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingProgress(100);
+      const timeout = window.setTimeout(() => setLoadingProgress(0), 300);
+      return () => window.clearTimeout(timeout);
+    }
+
+    if (loadingProgress === 0) {
+      setLoadingProgress(5);
+    }
+  }, [isLoading, loadingProgress]);
 
   // Expand mutation
   const expandMutation = useMutation({
@@ -102,41 +161,15 @@ export default function Home() {
           seedTitle: nodeId, 
           depth: Math.min(depth, 2), // Limit expansion depth
           maxNodes: Math.floor(maxNodes / 2), 
+          baseGraph: data,
         }),
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to expand');
-      }
-      
-      return response.json() as Promise<CrawlResult>;
+      return readCrawlResponse(response);
     },
     onSuccess: (newData) => {
       if (data) {
-        // Merge results
-        const existingNodeIds = new Set(data.nodes.map(n => n.id));
-        const newNodes = newData.nodes.filter(n => !existingNodeIds.has(n.id));
-        
-        const existingEdges = new Set(data.edges.map(e => `${e.source}|${e.target}`));
-        const newEdges = newData.edges.filter(
-          e => !existingEdges.has(`${e.source}|${e.target}`)
-        );
-        
-        // Merge positions
-        const mergedPositions = { ...data.positions, ...newData.positions };
-        
-        // Merge communities (recalculate would be better but keeping simple)
-        
-        const mergedResult: CrawlResult = {
-          ...data,
-          id: data.id + '-expanded',
-          nodes: [...data.nodes, ...newNodes],
-          edges: [...data.edges, ...newEdges],
-          positions: mergedPositions,
-          crawledAt: new Date().toISOString(),
-        };
-        
-        queryClient.setQueryData(['crawl', seedTitle, depth, maxNodes], mergedResult);
+        queryClient.setQueryData(['crawl', seedTitle, depth, maxNodes], newData);
       }
     },
   });
@@ -235,6 +268,20 @@ export default function Home() {
       {/* Header */}
       <header className="relative z-20 flex-shrink-0 glass border-b border-white/10 px-6 py-4">
         <div className="max-w-7xl mx-auto">
+          {isLoading && (
+            <div className="mb-4">
+              <div className="mb-2 flex items-center justify-between text-xs text-slate-300">
+                <span>Crawling Wikipedia</span>
+                <span>{Math.min(Math.round(loadingProgress), 99)}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-700/80">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 transition-all duration-500 ease-out"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
               {/* Animated logo */}

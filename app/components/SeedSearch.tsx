@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 
 interface SearchResult {
   title: string;
+  exact?: boolean;
 }
 
 interface SeedSearchProps {
@@ -19,13 +20,15 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<NodeJS.Timeout>();
+  const requestControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const cacheRef = useRef<Map<string, SearchResult[]>>(new Map());
 
   useEffect(() => {
     const trimmed = query.trim();
 
-    if (trimmed.length < 2) {
+    if (trimmed.length < 1) {
+      requestControllerRef.current?.abort();
       setSuggestions([]);
       setIsSearching(false);
       return;
@@ -40,24 +43,37 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
       return;
     }
 
+    const cachedPrefix = Array.from(cacheRef.current.entries())
+      .filter(([key]) => trimmed.toLowerCase().startsWith(key))
+      .sort(([a], [b]) => b.length - a.length)[0]?.[1];
+
+    if (cachedPrefix) {
+      setSuggestions(cachedPrefix.filter(({ title }) =>
+        title.toLowerCase().includes(trimmed.toLowerCase())
+      ));
+      setShowSuggestions(true);
+    }
+
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
 
+    requestControllerRef.current?.abort();
     const requestId = ++requestIdRef.current;
     setIsSearching(true);
     debounceRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      requestControllerRef.current = controller;
+
       try {
-        const controller = new AbortController();
         const response = await fetch(
           `/api/wikipedia/search?q=${encodeURIComponent(trimmed)}`,
-          { signal: controller.signal }
+          { signal: controller.signal, headers: { Accept: 'application/json' } }
         );
 
         if (!response.ok) {
           if (response.status === 429) {
             if (requestId === requestIdRef.current) {
-              setSuggestions([]);
               setIsSearching(false);
             }
             return;
@@ -80,12 +96,13 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
           setIsSearching(false);
         }
       }
-    }, 100);
+    }, 50);
 
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
+      requestControllerRef.current?.abort();
     };
   }, [query]);
 
@@ -93,9 +110,6 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
     e.preventDefault();
     if (selectedIndex >= 0 && suggestions[selectedIndex]) {
       handleSelect(suggestions[selectedIndex].title);
-    } else if (query.trim()) {
-      onSearch(query.trim());
-      setShowSuggestions(false);
     }
   };
 
@@ -181,6 +195,11 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         <span className="truncate">{suggestion.title}</span>
+                        {suggestion.exact && (
+                          <span className="ml-auto flex-shrink-0 text-[10px] uppercase tracking-wider text-slate-500">
+                            Open exact title
+                          </span>
+                        )}
                       </button>
                     </li>
                   ))}

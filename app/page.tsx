@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import type { CrawlResult, WikiNode } from '@/types/graph';
@@ -72,35 +72,9 @@ async function readCrawlResponse(
 
 // Animated background particles
 function AnimatedBackground() {
-  const particles = useMemo(() => {
-    return Array.from({ length: 30 }, (_, i) => ({
-      id: i,
-      left: `${Math.random() * 100}%`,
-      top: `${Math.random() * 100}%`,
-      delay: `${Math.random() * 20}s`,
-      duration: `${15 + Math.random() * 10}s`,
-      size: 2 + Math.random() * 4,
-    }));
-  }, []);
-
   return (
     <div className="animated-bg">
       <div className="grid-overlay" />
-      {particles.map((p) => (
-        <div
-          key={p.id}
-          className="particle"
-          style={{
-            left: p.left,
-            top: p.top,
-            animationDelay: p.delay,
-            animationDuration: p.duration,
-            width: p.size,
-            height: p.size,
-            background: ['#06b6d4', '#8b5cf6', '#ec4899', '#10b981'][p.id % 4],
-          }}
-        />
-      ))}
     </div>
   );
 }
@@ -180,8 +154,13 @@ export default function Home() {
     setSelectedNode(null);
     setSelectedPath(null);
     setFocusedNode(null);
-    refetch();
-  }, [refetch]);
+  }, []);
+
+  useEffect(() => {
+    if (seedTitle) {
+      refetch();
+    }
+  }, [seedTitle, refetch]);
 
   // Handle node click
   const handleNodeClick = useCallback((node: WikiNode) => {
@@ -254,19 +233,15 @@ export default function Home() {
       setSeedTitle(seed);
       if (d) setDepth(parseInt(d));
       if (n) setMaxNodes(parseInt(n));
-      // Trigger search after setting state
-      setTimeout(() => {
-        refetch();
-      }, 100);
     }
   }, [refetch]);
 
   return (
-    <div className="h-screen flex flex-col relative overflow-hidden">
+    <div className="app-shell h-screen flex flex-col relative overflow-hidden">
       <AnimatedBackground />
       
       {/* Header */}
-      <header className="relative z-20 flex-shrink-0 glass border-b border-white/10 px-6 py-4">
+      <header className="app-header relative z-20 flex-shrink-0 glass border-b border-white/10 px-6 py-4">
         <div className="max-w-7xl mx-auto">
           {isLoading && (
             <div className="mb-4">
@@ -297,10 +272,10 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold">
-                  <span className="gradient-text">Rabbit Hole</span>
-                  <span className="text-white/90"> Generator</span>
+                  <span className="gradient-text">WikiCrawl</span>
+                  <span className="text-white/90"> / field notes</span>
                 </h1>
-                <p className="text-sm text-cyan-400/80">Dive deep into Wikipedia connections</p>
+                <p className="text-sm text-cyan-400/80">A visual index of unexpected connections</p>
               </div>
             </div>
             

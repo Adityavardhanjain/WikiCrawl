@@ -1,5 +1,5 @@
 const WIKIPEDIA_API_BASE = 'https://en.wikipedia.org/w/api.php';
-const USER_AGENT = 'WikiCrawl/1.0 (https://github.com; contact@example.com)';
+const USER_AGENT = 'WikiCrawl/1.0 (https://github.com/WikiCrawl)';
 const MAX_RETRIES = 3;
 
 function sleep(ms: number): Promise<void> {
@@ -88,32 +88,19 @@ async function fetchWikipedia(params: Record<string, string>): Promise<Wikipedia
 }
 
 export async function searchWikipedia(query: string): Promise<WikipediaSearchResult[]> {
-  if (!query || query.trim().length < 2) {
+  if (!query || query.trim().length < 1) {
     return [];
   }
 
-  const url = new URL(WIKIPEDIA_API_BASE);
-  url.searchParams.set('format', 'json');
-  url.searchParams.set('origin', '*');
-  url.searchParams.set('action', 'opensearch');
-  url.searchParams.set('search', query);
-  url.searchParams.set('limit', '10');
-  url.searchParams.set('namespace', '0');
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      'User-Agent': USER_AGENT,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Wikipedia API error: ${response.status}`);
-  }
-
-  const data = await response.json() as [string, string[], string[], string[]];
+  const data = await fetchWikipedia({
+    action: 'opensearch',
+    search: query,
+    limit: '10',
+    namespace: '0',
+  }) as unknown as [string, string[], string[], string[]];
 
   // opensearch returns [query, titles, descriptions, urls]
-  const titles = data[1];
+  const titles = data[1] ?? [];
   return titles.map((title) => ({ title }));
 }
 

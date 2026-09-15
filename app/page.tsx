@@ -5,7 +5,6 @@ import Graph from 'graphology';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import type { Community, CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
-import { getShortestPath } from '@/lib/graphAnalysis';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
 import { Sidebar } from './components/Sidebar';
@@ -25,6 +24,66 @@ const GraphCanvas = dynamic(
 );
 
 type ColorMode = 'community' | 'depth';
+
+function validateGraphData(data: Partial<CrawlResult> | null | undefined): string[] {
+  if (!data) {
+    return ['No graph data is available.'];
+  }
+
+  const issues: string[] = [];
+  if (!Array.isArray(data.nodes)) {
+    issues.push('Node list is missing.');
+    return issues;
+  }
+
+  if (!Array.isArray(data.edges)) {
+    issues.push('Edge list is missing.');
+  }
+
+  if (data.nodes.length === 0) {
+    issues.push('Graph is empty.');
+  }
+
+  const validNodeIds = new Set(data.nodes.map((node) => node.id));
+  for (const edge of data.edges ?? []) {
+    if (!validNodeIds.has(edge.source) || !validNodeIds.has(edge.target)) {
+      issues.push(`Edge references missing nodes: ${edge.source} -> ${edge.target}`);
+    }
+  }
+
+  for (const node of data.nodes) {
+    if (!node || typeof node.id !== 'string' || !node.id.trim()) {
+      issues.push('A node has an invalid id.');
+      continue;
+    }
+
+    if (!Number.isFinite(node.depth)) {
+      issues.push(`Node ${node.id} has an invalid depth.`);
+    }
+
+    if (!Number.isFinite(node.pagerank)) {
+      issues.push(`Node ${node.id} has an invalid PageRank.`);
+    }
+
+    if (!Number.isFinite(node.betweenness)) {
+      issues.push(`Node ${node.id} has an invalid betweenness value.`);
+    }
+
+    if (data.positions?.[node.id] && (!Number.isFinite(data.positions[node.id].x) || !Number.isFinite(data.positions[node.id].y))) {
+      issues.push(`Node ${node.id} has invalid saved coordinates.`);
+    }
+  }
+
+  const invalidPositions = Object.entries(data.positions ?? {}).filter(([, pos]) => (
+    !pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)
+  ));
+
+  if (invalidPositions.length > 0) {
+    issues.push('One or more saved node positions are invalid.');
+  }
+
+  return issues;
+}
 
 async function readCrawlResponse(
   response: Response,
@@ -98,14 +157,15 @@ export default function Home() {
   
   // State
   const [seedTitle, setSeedTitle] = useState('');
-  const [depth, setDepth] = useState(2);
-  const [maxNodes, setMaxNodes] = useState(200);
+  const [depth, setDepth] = useState(1);
+  const [maxNodes, setMaxNodes] = useState(50);
   const [colorMode, setColorMode] = useState<ColorMode>('community');
   const [selectedNode, setSelectedNode] = useState<WikiNode | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string[] | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
+  const [graphError, setGraphError] = useState<string | null>(null);
+  const [explorationHistory, setExplorationHistory] = useState<Array<{ id: string; title: string }>>([]);
 
   const mergeLiveData = useCallback((update: (current: CrawlResult) => CrawlResult) => {
     setLiveData((current) => update(current ?? {
@@ -129,39 +189,68 @@ export default function Home() {
   const { data, isLoading, error, refetch } = useQuery<CrawlResult>({
     queryKey: ['crawl', seedTitle, depth, maxNodes],
     queryFn: async () => {
-      const response = await fetch('/api/crawl', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seedTitle, depth, maxNodes }),
-      });
-      return readCrawlResponse(response, updateLoadingProgress, {
-        onNodes: (nodes) => mergeLiveData((current) => ({
-          ...current,
-          nodes: Array.from(new Map([...current.nodes, ...nodes].map((node) => [node.id, node])).values()),
-        })),
-        onEdges: (edges) => mergeLiveData((current) => ({
-          ...current,
-          edges: Array.from(new Map([...current.edges, ...edges].map((edge) => [`${edge.source}|${edge.target}`, edge])).values()),
-        })),
-        onAnalysis: (nodes, communities) => mergeLiveData((current) => ({
-          ...current,
-          nodes: Array.from(new Map([...current.nodes, ...nodes].map((node) => [node.id, node])).values()),
-          communities,
-        })),
-        onExtracts: (extracts) => mergeLiveData((current) => ({
-          ...current,
-          nodes: current.nodes.map((node) => {
-            const extract = extracts.find((item) => item.nodeId === node.id)?.extract;
-            return extract ? { ...node, extract } : node;
-          }),
-        })),
-      });
+      try {
+        const response = await fetch('/api/crawl', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seedTitle, depth, maxNodes }),
+        });
+        return await readCrawlResponse(response, updateLoadingProgress, {
+          onNodes: (nodes) => mergeLiveData((current) => ({
+            ...current,
+            nodes: Array.from(new Map([...current.nodes, ...nodes].map((node) => [node.id, node])).values()),
+          })),
+          onEdges: (edges) => mergeLiveData((current) => ({
+            ...current,
+            edges: Array.from(new Map([...current.edges, ...edges].map((edge) => [`${edge.source}|${edge.target}`, edge])).values()),
+          })),
+          onAnalysis: (nodes, communities) => mergeLiveData((current) => ({
+            ...current,
+            nodes: Array.from(new Map([...current.nodes, ...nodes].map((node) => [node.id, node])).values()),
+            communities,
+          })),
+          onExtracts: (extracts) => mergeLiveData((current) => ({
+            ...current,
+            nodes: current.nodes.map((node) => {
+              const extract = extracts.find((item) => item.nodeId === node.id)?.extract;
+              return extract ? { ...node, extract } : node;
+            }),
+          })),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to explore this topic right now.';
+        setGraphError(message);
+        throw error;
+      }
     },
     enabled: false,
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
 
   const displayData = data ?? liveData;
+
+  useEffect(() => {
+    if (!displayData) return;
+
+    const stillExists = displayData.nodes.some((node) => node.id === selectedNode?.id);
+    if (selectedNode && !stillExists) {
+      setSelectedNode(null);
+    }
+  }, [displayData, selectedNode]);
+
+  useEffect(() => {
+    if (!selectedNode || !selectedNode.title) return;
+
+    setExplorationHistory((current) => {
+      const next = [...current];
+      const existingIndex = next.findIndex((item) => item.id === selectedNode.id);
+      if (existingIndex >= 0) {
+        next.splice(existingIndex, 1);
+      }
+      next.push({ id: selectedNode.id, title: selectedNode.title });
+      return next.slice(-6);
+    });
+  }, [selectedNode]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -202,9 +291,10 @@ export default function Home() {
   const handleSearch = useCallback((title: string) => {
     setSeedTitle(title);
     setLiveData(null);
+    setGraphError(null);
     setSelectedNode(null);
-    setSelectedPath(null);
     setFocusedNode(null);
+    setExplorationHistory([]);
   }, []);
 
   useEffect(() => {
@@ -213,36 +303,12 @@ export default function Home() {
     }
   }, [seedTitle, refetch]);
 
-  const pathGraph = useMemo(() => {
-    const graph = new Graph({ type: 'directed', multi: false });
-
-    for (const node of displayData?.nodes ?? []) {
-      graph.addNode(node.id);
-    }
-
-    for (const edge of displayData?.edges ?? []) {
-      if (graph.hasNode(edge.source) && graph.hasNode(edge.target) && !graph.hasEdge(edge.source, edge.target)) {
-        graph.addEdge(edge.source, edge.target);
-      }
-    }
-
-    return graph;
-  }, [displayData?.nodes, displayData?.edges]);
-
   // Handle node click
   const handleNodeClick = useCallback((node: WikiNode) => {
     setSelectedNode(node);
-    setSelectedPath(null);
+    setFocusedNode(node.id);
+    setGraphError(null);
   }, []);
-
-  // Handle path selection
-  const handlePathSelect = useCallback((from: string, to: string) => {
-    if (!displayData) return;
-
-    const path = getShortestPath(pathGraph, from, to);
-    setSelectedPath(path?.path ?? []);
-    setSelectedNode(null);
-  }, [displayData, pathGraph]);
 
   // Handle node selection from sidebar
   const handleNodeSelect = useCallback((nodeId: string) => {
@@ -264,6 +330,7 @@ export default function Home() {
 
   // Handle expand from node
   const handleExpand = useCallback((nodeId: string) => {
+    setGraphError(null);
     expandMutation.mutate(nodeId);
   }, [expandMutation]);
 
@@ -291,6 +358,16 @@ export default function Home() {
       if (n) setMaxNodes(parseInt(n));
     }
   }, [refetch]);
+
+  useEffect(() => {
+    if (!displayData) return;
+    const issues = validateGraphData(displayData);
+    if (issues.length > 0) {
+      setGraphError(issues[0]);
+      setSelectedNode(null);
+      setFocusedNode(null);
+    }
+  }, [displayData]);
 
   return (
     <div className="app-shell h-screen flex flex-col relative overflow-hidden">
@@ -383,7 +460,7 @@ export default function Home() {
       <div className="flex-1 flex overflow-hidden relative z-10">
         {/* Graph area */}
         <div className="flex-1 relative">
-          {isLoading && (
+          {isLoading && !displayData && (
             <div className="absolute inset-0 flex items-center justify-center bg-slate-950/90 z-50 backdrop-blur-sm">
               <div className="text-center">
                 <div className="loading-spinner mx-auto mb-6" />
@@ -394,6 +471,14 @@ export default function Home() {
                   <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                   <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
+              </div>
+            </div>
+          )}
+
+          {isLoading && displayData && (
+            <div className="absolute inset-x-4 top-4 z-30 flex justify-center">
+              <div className="rounded-full border border-cyan-500/30 bg-slate-950/80 px-4 py-2 text-xs text-cyan-200 shadow-lg backdrop-blur-md">
+                Exploring a new neighborhood...
               </div>
             </div>
           )}
@@ -424,69 +509,58 @@ export default function Home() {
 
           {displayData && (
             <>
+              {explorationHistory.length > 0 && (
+                <div className="absolute left-1/2 top-4 -translate-x-1/2 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-slate-900/80 px-3 py-2 text-xs text-slate-300 backdrop-blur-md">
+                  {explorationHistory.map((step, index) => (
+                    <div key={step.id} className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const node = displayData.nodes.find((candidate) => candidate.id === step.id);
+                          if (node) {
+                            setSelectedNode(node);
+                            setFocusedNode(node.id);
+                          }
+                        }}
+                        className="rounded-full bg-white/5 px-2.5 py-1.5 text-slate-200 transition hover:bg-white/10 hover:text-white"
+                      >
+                        {step.title}
+                      </button>
+                      {index < explorationHistory.length - 1 && (
+                        <span className="text-slate-500">→</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <GraphCanvas
                 data={displayData}
                 colorMode={colorMode}
                 onNodeClick={handleNodeClick}
-                onPathSelect={handlePathSelect}
-                selectedPath={selectedPath}
                 focusedNode={focusedNode}
-                onExpandNode={handleExpand}
               />
               
               <NodeDetailPanel
                 node={selectedNode}
                 data={displayData}
-                onClose={() => setSelectedNode(null)}
+                onClose={() => {
+                  setSelectedNode(null);
+                  setFocusedNode(null);
+                }}
                 onExpand={handleExpand}
                 isExpanding={expandMutation.isPending}
               />
 
-              {/* Path info */}
-              {selectedPath && selectedPath.length > 0 && (
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 glass-strong rounded-2xl px-6 py-4 shadow-2xl border border-cyan-500/30">
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-cyan-500 to-purple-500 flex items-center justify-center">
-                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                        </svg>
-                      </div>
-                      <span className="text-cyan-400 font-bold">
-                        {selectedPath.length - 1} {selectedPath.length === 2 ? 'hop' : 'hops'}
-                      </span>
-                    </div>
-                    <div className="w-px h-8 bg-white/20" />
-                    <div className="flex items-center gap-2 max-w-xl overflow-x-auto">
-                      {selectedPath.map((nodeId, index) => (
-                        <span key={nodeId} className="flex items-center flex-shrink-0">
-                          <span className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                            index === 0 || index === selectedPath.length - 1
-                              ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white'
-                              : 'bg-slate-700/80 text-slate-300'
-                          }`}>
-                            {displayData.nodes.find(n => n.id === nodeId)?.title || nodeId}
-                          </span>
-                          {index < selectedPath.length - 1 && (
-                            <svg className="w-4 h-4 text-cyan-400 mx-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                            </svg>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => setSelectedPath(null)}
-                      className="ml-2 p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              )}
             </>
+          )}
+
+          {graphError && displayData && (
+            <div className="absolute inset-x-0 bottom-6 z-30 flex justify-center px-4">
+              <div className="max-w-md rounded-2xl border border-amber-500/30 bg-slate-950/85 px-4 py-3 text-sm text-amber-200 shadow-xl backdrop-blur-md">
+                {graphError}
+              </div>
+            </div>
           )}
 
           {!displayData && !isLoading && !error && (

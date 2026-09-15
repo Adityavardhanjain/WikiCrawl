@@ -278,13 +278,26 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   };
 }
 
+export function sanitizeGraphData(nodes: WikiNode[], edges: WikiEdge[]): { nodes: WikiNode[]; edges: WikiEdge[] } {
+  const validNodeIds = new Set(nodes.filter((node) => node && node.id).map((node) => node.id));
+  const dedupedNodes = Array.from(new Map(nodes.filter((node) => node && node.id).map((node) => [node.id, node])).values());
+  const validEdges = edges.filter((edge) => {
+    if (!edge) return false;
+    if (!edge.source || !edge.target) return false;
+    if (edge.source === edge.target) return false;
+    return validNodeIds.has(edge.source) && validNodeIds.has(edge.target);
+  });
+
+  return { nodes: dedupedNodes, edges: validEdges };
+}
+
 export function buildGraph(nodes: WikiNode[], edges: WikiEdge[]): Graph {
+  const { nodes: validNodes, edges: validEdges } = sanitizeGraphData(nodes, edges);
   const graph = new Graph({ type: 'directed' });
   
-  // Use a Set to track added nodes and avoid duplicates
   const addedNodes = new Set<string>();
   
-  for (const node of nodes) {
+  for (const node of validNodes) {
     if (!addedNodes.has(node.id)) {
       graph.addNode(node.id, {
         title: node.title,
@@ -299,12 +312,12 @@ export function buildGraph(nodes: WikiNode[], edges: WikiEdge[]): Graph {
     }
   }
   
-  for (const edge of edges) {
+  for (const edge of validEdges) {
     if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
       if (!graph.hasEdge(edge.source, edge.target)) {
         try {
           graph.addEdge(edge.source, edge.target);
-        } catch (e) {
+        } catch {
           // Edge already exists, ignore
         }
       }

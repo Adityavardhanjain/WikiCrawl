@@ -5,10 +5,10 @@ import shortestPath from 'graphology-shortest-path';
 import type { WikiNode, WikiEdge, Community } from '@/types/graph';
 
 const COMMUNITY_COLORS = [
-  '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
-  '#F7DC6F', '#BB8FCE', '#85C1E9', '#F8B500', '#2ECC71',
-  '#E74C3C', '#9B59B6', '#3498DB', '#1ABC9C', '#E67E22',
-  '#1F77B4', '#FF7F0E', '#2CA02C', '#D62728', '#9467BD',
+  '#e76f51', '#2a9d8f', '#457b9d', '#f4a261', '#84a59d',
+  '#c06c84', '#6d597a', '#5f8d89', '#d1495b', '#4f6d7a',
+  '#7a9e9f', '#bc6c25', '#386641', '#577590', '#b56576',
+  '#588157', '#7b6d8d', '#3d5a80', '#cb997e', '#52796f',
 ];
 
 export interface GraphAnalysisResult {
@@ -123,7 +123,7 @@ export function getNodeColor(
   maxDepth: number
 ): string {
   if (node.id === seedId) {
-    return '#FFD700'; // Gold for seed
+    return '#f08a70';
   }
   
   if (colorMode === 'community') {

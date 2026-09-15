@@ -164,6 +164,60 @@ body {
   position: relative;
 }
 
+.graph-surface {
+  background-color: #08111d;
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(45, 212, 191, 0.1) 0%, rgba(8, 17, 29, 0.8) 20%, rgba(8, 17, 29, 1) 60%),
+    linear-gradient(rgba(148, 163, 184, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.03) 1px, transparent 1px);
+  background-size: auto, 54px 54px, 54px 54px;
+  background-position: center, center, center;
+}
+
+.graph-surface::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(118deg, transparent 0 44%, rgba(45, 212, 191, 0.04) 50%, transparent 56%);
+  pointer-events: none;
+}
+
+.graph-surface::after {
+  content: '';
+  position: absolute;
+  inset: 12% 8%;
+  border: 1px solid rgba(103, 232, 249, 0.08);
+  clip-path: polygon(0 18%, 32% 0, 100% 14%, 86% 100%, 18% 84%);
+  pointer-events: none;
+}
+
+.graph-overlay {
+  background: rgba(8, 17, 29, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.22);
+  backdrop-filter: blur(12px);
+}
+
+.graph-control {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  color: #cbd5e1;
+  font: 500 12px var(--font-mono), monospace;
+  border-radius: 5px;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.graph-control-wide {
+  min-width: 42px;
+  font-family: var(--font-display), sans-serif;
+}
+
+.graph-control:hover {
+  color: #f8fafc;
+  background: rgba(45, 212, 191, 0.14);
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

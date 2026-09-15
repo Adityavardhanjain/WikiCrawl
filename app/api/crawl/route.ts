@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { crawlWikipedia, buildGraph } from '@/lib/crawler';
+import { crawlWikipedia, buildGraph, sanitizeGraphData } from '@/lib/crawler';
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { getCachedResult, setCachedResult, generateCacheKey } from '@/lib/db';
 import { getPageExtract } from '@/lib/wikipedia';
@@ -66,14 +66,15 @@ export async function POST(request: NextRequest) {
           }
 
           const edgeKeys = new Set<string>();
-          const edges = [...(baseGraph?.edges ?? []), ...crawledEdges].filter((edge) => {
+          const mergedEdges = [...(baseGraph?.edges ?? []), ...crawledEdges].filter((edge) => {
             const key = `${edge.source}|${edge.target}`;
             if (edgeKeys.has(key)) return false;
             edgeKeys.add(key);
             return true;
           });
           const nodes = Array.from(nodeMap.values());
-          const graph = buildGraph(nodes, edges);
+          const { nodes: validNodes, edges: validEdges } = sanitizeGraphData(nodes, mergedEdges);
+          const graph = buildGraph(validNodes, validEdges);
 
           for (const [nodeId, position] of Object.entries(baseGraph?.positions ?? {})) {
             if (graph.hasNode(nodeId)) {
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest) {
             id: nanoid(),
             seedId,
             nodes: analyzedNodes,
-            edges,
+            edges: validEdges,
             communities,
             crawledAt: new Date().toISOString(),
             positions,

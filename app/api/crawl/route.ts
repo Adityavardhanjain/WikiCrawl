@@ -26,8 +26,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validatedDepth = Math.min(Math.max(depth || 1, 1), 3);
-    const validatedMaxNodes = Math.min(Math.max(maxNodes || 100, 50), 500);
+    const validatedDepth = Math.min(Math.max(depth || 3, 1), 3);
+    const validatedMaxNodes = Math.min(Math.max(maxNodes || 50, 50), 500);
 
     const cacheKey = generateCacheKey(seedTitle, validatedDepth, validatedMaxNodes);
     const cachedResult = baseGraph ? null : getCachedResult(cacheKey);

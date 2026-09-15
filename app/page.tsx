@@ -157,7 +157,7 @@ export default function Home() {
   
   // State
   const [seedTitle, setSeedTitle] = useState('');
-  const [depth, setDepth] = useState(1);
+  const [depth, setDepth] = useState(3);
   const [maxNodes, setMaxNodes] = useState(50);
   const [colorMode, setColorMode] = useState<ColorMode>('community');
   const [selectedNode, setSelectedNode] = useState<WikiNode | null>(null);

@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import Graph from 'graphology';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import type { CrawlResult, WikiNode } from '@/types/graph';
+import type { Community, CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
+import { getShortestPath } from '@/lib/graphAnalysis';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
 import { Sidebar } from './components/Sidebar';
@@ -26,7 +28,13 @@ type ColorMode = 'community' | 'depth';
 
 async function readCrawlResponse(
   response: Response,
-  onProgress?: (visited: number, total: number) => void
+  onProgress?: (visited: number, total: number) => void,
+  handlers?: {
+    onNodes?: (nodes: WikiNode[]) => void;
+    onEdges?: (edges: WikiEdge[]) => void;
+    onAnalysis?: (nodes: WikiNode[], communities: Community[]) => void;
+    onExtracts?: (extracts: { nodeId: string; extract: string | null }[]) => void;
+  }
 ): Promise<CrawlResult> {
   if (!response.ok) {
     const errorData = await response.json();
@@ -54,13 +62,19 @@ async function readCrawlResponse(
     buffer = chunks.pop() ?? '';
 
     for (const chunk of chunks) {
+      const eventLine = chunk.split('\n').find((line) => line.startsWith('event:'));
       const dataLine = chunk.split('\n').find((line) => line.startsWith('data:'));
       if (!dataLine) continue;
 
       const payload = JSON.parse(dataLine.slice(5).trim());
+      const event = eventLine?.slice(6).trim();
       if (payload?.progress && onProgress) {
         onProgress(payload.progress.visited, payload.progress.total);
       }
+      if (event === 'nodes') handlers?.onNodes?.(payload.nodes ?? []);
+      if (event === 'edges') handlers?.onEdges?.(payload.edges ?? []);
+      if (event === 'analysis') handlers?.onAnalysis?.(payload.nodes ?? [], payload.communities ?? []);
+      if (event === 'extracts') handlers?.onExtracts?.(payload.extracts ?? []);
       if (payload?.result) finalResult = payload.result as CrawlResult;
       if (payload?.error) throw new Error(payload.error);
     }
@@ -91,6 +105,19 @@ export default function Home() {
   const [selectedPath, setSelectedPath] = useState<string[] | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [liveData, setLiveData] = useState<CrawlResult | null>(null);
+
+  const mergeLiveData = useCallback((update: (current: CrawlResult) => CrawlResult) => {
+    setLiveData((current) => update(current ?? {
+      id: 'streaming',
+      seedId: seedTitle,
+      nodes: [],
+      edges: [],
+      communities: [],
+      crawledAt: new Date().toISOString(),
+      positions: {},
+    }));
+  }, [seedTitle]);
 
   const updateLoadingProgress = useCallback((visited: number, total: number) => {
     const safeTotal = Math.max(total, 1);
@@ -107,11 +134,34 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ seedTitle, depth, maxNodes }),
       });
-      return readCrawlResponse(response, updateLoadingProgress);
+      return readCrawlResponse(response, updateLoadingProgress, {
+        onNodes: (nodes) => mergeLiveData((current) => ({
+          ...current,
+          nodes: Array.from(new Map([...current.nodes, ...nodes].map((node) => [node.id, node])).values()),
+        })),
+        onEdges: (edges) => mergeLiveData((current) => ({
+          ...current,
+          edges: Array.from(new Map([...current.edges, ...edges].map((edge) => [`${edge.source}|${edge.target}`, edge])).values()),
+        })),
+        onAnalysis: (nodes, communities) => mergeLiveData((current) => ({
+          ...current,
+          nodes: Array.from(new Map([...current.nodes, ...nodes].map((node) => [node.id, node])).values()),
+          communities,
+        })),
+        onExtracts: (extracts) => mergeLiveData((current) => ({
+          ...current,
+          nodes: current.nodes.map((node) => {
+            const extract = extracts.find((item) => item.nodeId === node.id)?.extract;
+            return extract ? { ...node, extract } : node;
+          }),
+        })),
+      });
     },
     enabled: false,
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
+
+  const displayData = data ?? liveData;
 
   useEffect(() => {
     if (!isLoading) {
@@ -135,14 +185,14 @@ export default function Home() {
           seedTitle: nodeId, 
           depth: Math.min(depth, 2), // Limit expansion depth
           maxNodes: Math.floor(maxNodes / 2), 
-          baseGraph: data,
+          baseGraph: displayData ?? undefined,
         }),
       });
       
       return readCrawlResponse(response);
     },
     onSuccess: (newData) => {
-      if (data) {
+      if (displayData) {
         queryClient.setQueryData(['crawl', seedTitle, depth, maxNodes], newData);
       }
     },
@@ -151,6 +201,7 @@ export default function Home() {
   // Handle search
   const handleSearch = useCallback((title: string) => {
     setSeedTitle(title);
+    setLiveData(null);
     setSelectedNode(null);
     setSelectedPath(null);
     setFocusedNode(null);
@@ -162,6 +213,22 @@ export default function Home() {
     }
   }, [seedTitle, refetch]);
 
+  const pathGraph = useMemo(() => {
+    const graph = new Graph({ type: 'directed', multi: false });
+
+    for (const node of displayData?.nodes ?? []) {
+      graph.addNode(node.id);
+    }
+
+    for (const edge of displayData?.edges ?? []) {
+      if (graph.hasNode(edge.source) && graph.hasNode(edge.target) && !graph.hasEdge(edge.source, edge.target)) {
+        graph.addEdge(edge.source, edge.target);
+      }
+    }
+
+    return graph;
+  }, [displayData?.nodes, displayData?.edges]);
+
   // Handle node click
   const handleNodeClick = useCallback((node: WikiNode) => {
     setSelectedNode(node);
@@ -170,41 +237,30 @@ export default function Home() {
 
   // Handle path selection
   const handlePathSelect = useCallback((from: string, to: string) => {
-    // Compute shortest path using the data
-    if (!data) return;
-    
-    // Simple BFS for path finding (treating as undirected)
-    const adjacency = new Map<string, string[]>();
-    for (const node of data.nodes) {
-      adjacency.set(node.id, []);
-    }
-    for (const edge of data.edges) {
-      adjacency.get(edge.source)?.push(edge.target);
-      adjacency.get(edge.target)?.push(edge.source);
-    }
-    
-    const path = bfs(adjacency, from, to);
-    setSelectedPath(path);
+    if (!displayData) return;
+
+    const path = getShortestPath(pathGraph, from, to);
+    setSelectedPath(path?.path ?? []);
     setSelectedNode(null);
-  }, [data]);
+  }, [displayData, pathGraph]);
 
   // Handle node selection from sidebar
   const handleNodeSelect = useCallback((nodeId: string) => {
     setFocusedNode(nodeId);
-    const node = data?.nodes.find(n => n.id === nodeId);
+    const node = displayData?.nodes.find(n => n.id === nodeId);
     if (node) {
       setSelectedNode(node);
     }
-  }, [data]);
+  }, [displayData]);
 
   // Handle community selection
   const handleCommunitySelect = useCallback((communityId: number) => {
-    if (!data) return;
-    const firstNode = data.nodes.find(n => n.communityId === communityId);
+    if (!displayData) return;
+    const firstNode = displayData.nodes.find(n => n.communityId === communityId);
     if (firstNode) {
       setFocusedNode(firstNode.id);
     }
-  }, [data]);
+  }, [displayData]);
 
   // Handle expand from node
   const handleExpand = useCallback((nodeId: string) => {
@@ -213,14 +269,14 @@ export default function Home() {
 
   // Shareable URL
   useEffect(() => {
-    if (data && data.seedId) {
+    if (displayData && displayData.seedId) {
       const url = new URL(window.location.href);
-      url.searchParams.set('seed', data.seedId);
+      url.searchParams.set('seed', displayData.seedId);
       url.searchParams.set('depth', depth.toString());
       url.searchParams.set('nodes', maxNodes.toString());
       window.history.replaceState({}, '', url.toString());
     }
-  }, [data, depth, maxNodes]);
+  }, [displayData, depth, maxNodes]);
 
   // Load from URL params
   useEffect(() => {
@@ -243,7 +299,7 @@ export default function Home() {
       {/* Header */}
       <header className="app-header relative z-20 flex-shrink-0 glass border-b border-white/10 px-6 py-4">
         <div className="max-w-7xl mx-auto">
-          {isLoading && (
+          {isLoading && !displayData && (
             <div className="mb-4">
               <div className="mb-2 flex items-center justify-between text-xs text-slate-300">
                 <span>Crawling Wikipedia</span>
@@ -366,10 +422,10 @@ export default function Home() {
             </div>
           )}
 
-          {data && !isLoading && (
+          {displayData && (
             <>
               <GraphCanvas
-                data={data}
+                data={displayData}
                 colorMode={colorMode}
                 onNodeClick={handleNodeClick}
                 onPathSelect={handlePathSelect}
@@ -380,7 +436,7 @@ export default function Home() {
               
               <NodeDetailPanel
                 node={selectedNode}
-                data={data}
+                data={displayData}
                 onClose={() => setSelectedNode(null)}
                 onExpand={handleExpand}
                 isExpanding={expandMutation.isPending}
@@ -409,7 +465,7 @@ export default function Home() {
                               ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white'
                               : 'bg-slate-700/80 text-slate-300'
                           }`}>
-                            {data.nodes.find(n => n.id === nodeId)?.title || nodeId}
+                            {displayData.nodes.find(n => n.id === nodeId)?.title || nodeId}
                           </span>
                           {index < selectedPath.length - 1 && (
                             <svg className="w-4 h-4 text-cyan-400 mx-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -433,7 +489,7 @@ export default function Home() {
             </>
           )}
 
-          {!data && !isLoading && !error && (
+          {!displayData && !isLoading && !error && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center max-w-lg">
                 {/* Animated icon */}
@@ -486,33 +542,8 @@ export default function Home() {
         </div>
 
         {/* Sidebar */}
-        {data && <Sidebar data={data} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} />}
+        {displayData && <Sidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} />}
       </div>
     </div>
   );
-}
-
-// Simple BFS implementation
-function bfs(adjacency: Map<string, string[]>, start: string, end: string): string[] {
-  const queue: string[][] = [[start]];
-  const visited = new Set<string>([start]);
-
-  while (queue.length > 0) {
-    const path = queue.shift()!;
-    const current = path[path.length - 1];
-
-    if (current === end) {
-      return path;
-    }
-
-    const neighbors = adjacency.get(current) || [];
-    for (const neighbor of neighbors) {
-      if (!visited.has(neighbor)) {
-        visited.add(neighbor);
-        queue.push([...path, neighbor]);
-      }
-    }
-  }
-
-  return []; // No path found
 }

@@ -1,3 +1,5 @@
+import { getCachedPageLinks, setCachedPageLinks } from './db';
+
 const WIKIPEDIA_API_BASE = 'https://en.wikipedia.org/w/api.php';
 const USER_AGENT = 'WikiCrawl/1.0 (https://github.com/WikiCrawl)';
 const MAX_RETRIES = 3;
@@ -127,13 +129,42 @@ export interface PageLinksResult {
   title: string;
   resolvedTitle: string;
   links: string[];
+}
+
+export interface PageLinksBatchResult {
+  pages: PageLinksResult[];
   continueToken?: string;
 }
 
-export async function getPageLinks(title: string, continueToken?: string): Promise<PageLinksResult> {
+const MAX_BATCH_TITLES = 50;
+
+export async function getPageLinksBatch(
+  titles: string[],
+  continueToken?: string
+): Promise<PageLinksBatchResult> {
+  if (titles.length === 0) {
+    return { pages: [] };
+  }
+
+  const requestedTitles = titles.slice(0, MAX_BATCH_TITLES);
+  const cachedPages = new Map<string, PageLinksResult>();
+  const missingTitles = requestedTitles.filter((title) => {
+    if (continueToken) return true;
+
+    const cachedPage = getCachedPageLinks(title);
+    if (!cachedPage) return true;
+
+    cachedPages.set(title, { ...cachedPage, title });
+    return false;
+  });
+
+  if (missingTitles.length === 0) {
+    return { pages: requestedTitles.map((title) => cachedPages.get(title)!) };
+  }
+
   const params: Record<string, string> = {
     action: 'query',
-    titles: title,
+    titles: missingTitles.join('|'),
     prop: 'links',
     plnamespace: '0', // Only article pages
     pllimit: 'max', // Maximum 500 links per request
@@ -148,34 +179,39 @@ export async function getPageLinks(title: string, continueToken?: string): Promi
   
   const pages = data.query?.pages;
   const redirects = data.query?.redirects || [];
-  
-  if (!pages) {
-    return { title, resolvedTitle: title, links: [] };
-  }
-
-  const pageId = Object.keys(pages)[0];
-  
-  // Check if page doesn't exist
-  if (pageId === '-1') {
-    return { title, resolvedTitle: title, links: [] };
-  }
-
-  const page = pages[pageId];
-  const links = page.links?.map((l) => l.title) || [];
-  
-  // Get the resolved title (accounting for redirects)
-  let resolvedTitle = page.title;
   const redirectMap = new Map(redirects.map(r => [r.title, r.to]));
-  if (redirectMap.has(title)) {
-    resolvedTitle = redirectMap.get(title)!;
+
+  const fetchedPages = missingTitles.map((title) => {
+    const resolvedTitle = redirectMap.get(title) || title;
+    const normalizedResolvedTitle = resolvedTitle.toLowerCase();
+    const normalizedTitle = title.toLowerCase();
+    const page = Object.values(pages || {}).find((candidate) => (
+      candidate.pageid !== -1 &&
+      (candidate.title.toLowerCase() === normalizedResolvedTitle || candidate.title.toLowerCase() === normalizedTitle)
+    ));
+
+    return {
+      title,
+      resolvedTitle: page?.title || resolvedTitle,
+      links: page?.links?.map((link) => link.title) || [],
+    };
+  });
+
+  if (!data['continue']?.plcontinue && !continueToken) {
+    for (const page of fetchedPages) {
+      setCachedPageLinks(page);
+    }
   }
 
   return {
-    title,
-    resolvedTitle,
-    links,
+    pages: requestedTitles.map((title) => cachedPages.get(title) || fetchedPages.find((page) => page.title === title)!).filter(Boolean),
     continueToken: data['continue']?.plcontinue,
   };
+}
+
+export async function getPageLinks(title: string, continueToken?: string): Promise<PageLinksResult> {
+  const result = await getPageLinksBatch([title], continueToken);
+  return result.pages[0] || { title, resolvedTitle: title, links: [] };
 }
 
 export function titleToUrl(title: string): string {

@@ -4,6 +4,7 @@ import forceAtlas2 from 'graphology-layout-forceatlas2';
 export interface LayoutOptions {
   iterations?: number;
   settings?: Record<string, unknown>;
+  fixedNodes?: Set<string>;
 }
 
 const DEFAULT_SETTINGS = {
@@ -24,7 +25,11 @@ export function computeLayout(
   options: LayoutOptions = {}
 ): { [key: string]: { x: number; y: number } } {
   const nodeCount = graph.order;
-  const { iterations = Math.min(100, Math.max(40, 120 - nodeCount / 3)), settings = {} } = options;
+  const {
+    iterations = Math.min(100, Math.max(40, 120 - nodeCount / 3)),
+    settings = {},
+    fixedNodes,
+  } = options;
 
   const layoutSettings = { ...DEFAULT_SETTINGS, ...settings };
 
@@ -35,10 +40,11 @@ export function computeLayout(
   if (nodeCount <= 20) {
     const positions: { [key: string]: { x: number; y: number } } = {};
     graph.forEachNode((node) => {
-      positions[node] = {
-        x: Math.random() * 800,
-        y: Math.random() * 600,
-      };
+      const x = graph.getNodeAttribute(node, 'x');
+      const y = graph.getNodeAttribute(node, 'y');
+      positions[node] = fixedNodes?.has(node) && typeof x === 'number' && typeof y === 'number'
+        ? { x, y }
+        : { x: Math.random() * 800, y: Math.random() * 600 };
     });
     return positions;
   }
@@ -47,6 +53,9 @@ export function computeLayout(
     if (!graph.getNodeAttribute(node, 'x')) {
       graph.setNodeAttribute(node, 'x', Math.random() * 1000);
       graph.setNodeAttribute(node, 'y', Math.random() * 800);
+    }
+    if (fixedNodes?.has(node)) {
+      graph.setNodeAttribute(node, 'fixed', true);
     }
   });
 

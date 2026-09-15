@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { CrawlResult } from '@/types/graph';
 import { getCommunityColor } from '@/lib/graphAnalysis';
 
@@ -14,9 +14,10 @@ interface SidebarProps {
 export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<'pagerank' | 'communities'>('pagerank');
   
-  const topPages = [...data.nodes]
-    .sort((a, b) => b.pagerank - a.pagerank)
-    .slice(0, 10);
+  const topPages = useMemo(
+    () => [...data.nodes].sort((a, b) => b.pagerank - a.pagerank).slice(0, 10),
+    [data.nodes]
+  );
 
   return (
     <aside className="w-80 glass-strong border-l border-white/10 flex flex-col overflow-hidden">

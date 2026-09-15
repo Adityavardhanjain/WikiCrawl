@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Graph from 'graphology';
 import { Sigma } from 'sigma';
-import type { CrawlResult, WikiNode } from '@/types/graph';
+import FA2Layout from 'graphology-layout-forceatlas2/worker';
+import type { CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
 import { getCommunityColor, getNodeSize } from '@/lib/graphAnalysis';
 
 interface GraphCanvasProps {
@@ -26,7 +27,12 @@ export function GraphCanvas({
   onExpandNode,
 }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const graphRef = useRef(new Graph({ type: 'directed', multi: false }));
   const sigmaRef = useRef<Sigma | null>(null);
+  const layoutRef = useRef<FA2Layout | null>(null);
+  const pendingEdgesRef = useRef(new Map<string, WikiEdge>());
+  const onNodeClickRef = useRef(onNodeClick);
+  const onPathSelectRef = useRef(onPathSelect);
   const [hoveredNode, setHoveredNode] = useState<WikiNode | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const firstSelectedNodeRef = useRef<string | null>(null);
@@ -36,46 +42,16 @@ export function GraphCanvas({
     return Math.max(...depths, 1);
   }, [data.nodes]);
 
-  // Build graph from data
-  const graph = useMemo(() => {
-    const g = new Graph({ type: 'directed', multi: false });
-
-    for (const node of data.nodes) {
-      const pos = data.positions[node.id] || { x: 0, y: 0 };
-      const isSeed = node.id === data.seedId;
-      
-      g.addNode(node.id, {
-        label: node.title,
-        x: pos.x,
-        y: pos.y,
-        size: getNodeSize(node.pagerank) * (isSeed ? 1.5 : 1),
-        color: isSeed ? '#FFD700' : colorMode === 'community' 
-          ? getCommunityColor(node.communityId, data.communities.length)
-          : getDepthColor(node.depth, maxDepth),
-        raw: node,
-        isSeed,
-      });
-    }
-
-    for (const edge of data.edges) {
-      if (g.hasNode(edge.source) && g.hasNode(edge.target)) {
-        try {
-          g.addEdge(edge.source, edge.target, {
-            size: 1,
-            color: 'rgba(255, 255, 255, 0.2)',
-          });
-        } catch (e) {
-          // Edge already exists
-        }
-      }
-    }
-
-    return g;
-  }, [data, colorMode, maxDepth]);
+  useEffect(() => {
+    onNodeClickRef.current = onNodeClick;
+    onPathSelectRef.current = onPathSelect;
+  }, [onNodeClick, onPathSelect]);
 
   // Initialize Sigma
   useEffect(() => {
-    if (!containerRef.current || sigmaRef.current) return;
+    if (!containerRef.current) return;
+
+    const graph = graphRef.current;
 
     const sigma = new Sigma(graph, containerRef.current, {
       renderLabels: true,
@@ -111,11 +87,11 @@ export function GraphCanvas({
       
       if (currentFirstSelectedNode && currentFirstSelectedNode !== node) {
         // Second click - find path
-        onPathSelect(currentFirstSelectedNode, node);
+        onPathSelectRef.current(currentFirstSelectedNode, node);
         firstSelectedNodeRef.current = null;
       } else {
         // First click
-        onNodeClick(nodeData);
+        onNodeClickRef.current(nodeData);
         firstSelectedNodeRef.current = node;
       }
     });
@@ -133,18 +109,97 @@ export function GraphCanvas({
 
     return () => {
       container.removeEventListener('mousemove', handleMouseMove);
+      layoutRef.current?.kill();
+      layoutRef.current = null;
       sigma.kill();
       sigmaRef.current = null;
     };
-  }, [graph, onNodeClick, onPathSelect]);
+  }, []);
+
+  // Merge streamed crawl data into the graph Sigma already owns.
+  useEffect(() => {
+    const graph = graphRef.current;
+
+    for (const node of data.nodes) {
+      const isSeed = node.id === data.seedId;
+      if (!graph.hasNode(node.id)) {
+        const neighbor = data.edges.find((edge) => (
+          edge.source === node.id && graph.hasNode(edge.target)
+        )) ?? data.edges.find((edge) => (
+          edge.target === node.id && graph.hasNode(edge.source)
+        ));
+        const parentId = neighbor?.source === node.id ? neighbor.target : neighbor?.source;
+        const parentPosition = parentId && graph.hasNode(parentId)
+          ? graph.getNodeAttributes(parentId)
+          : null;
+        const savedPosition = data.positions[node.id];
+        const x = savedPosition?.x ?? (parentPosition?.x as number | undefined ?? 0) + (Math.random() - 0.5) * 80;
+        const y = savedPosition?.y ?? (parentPosition?.y as number | undefined ?? 0) + (Math.random() - 0.5) * 80;
+
+        graph.addNode(node.id, {
+          label: node.title,
+          x,
+          y,
+          size: getNodeSize(node.pagerank) * (isSeed ? 1.5 : 1),
+          color: isSeed ? '#FFD700' : '#4ECDC4',
+          raw: node,
+          isSeed,
+        });
+      } else {
+        graph.mergeNodeAttributes(node.id, {
+          label: node.title,
+          raw: node,
+          isSeed,
+        });
+      }
+    }
+
+    for (const edge of data.edges) {
+      const key = `${edge.source}|${edge.target}`;
+      if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) {
+        pendingEdgesRef.current.set(key, edge);
+      } else if (!graph.hasEdge(edge.source, edge.target)) {
+        graph.addEdge(edge.source, edge.target, {
+          size: 1,
+          color: 'rgba(255, 255, 255, 0.2)',
+        });
+      }
+    }
+
+    pendingEdgesRef.current.forEach((edge, key) => {
+      if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
+        if (!graph.hasEdge(edge.source, edge.target)) {
+          graph.addEdge(edge.source, edge.target, {
+            size: 1,
+            color: 'rgba(255, 255, 255, 0.2)',
+          });
+        }
+        pendingEdgesRef.current.delete(key);
+      }
+    });
+
+    if (graph.order > 0 && !layoutRef.current) {
+      layoutRef.current = new FA2Layout(graph, {
+        settings: {
+          gravity: 1,
+          scalingRatio: 10,
+          slowDown: 5,
+          barnesHutOptimize: graph.order > 50,
+        },
+      });
+      layoutRef.current.start();
+    }
+  }, [data]);
 
   // Update colors when colorMode changes
   useEffect(() => {
     if (!sigmaRef.current) return;
 
+    const graph = graphRef.current;
     graph.forEachNode((node, attrs) => {
       const nodeData = attrs.raw as WikiNode;
       const isSeed = node === data.seedId;
+      graph.setNodeAttribute(node, 'size', getNodeSize(nodeData.pagerank) * (isSeed ? 1.5 : 1));
       
       graph.setNodeAttribute(node, 'color', isSeed ? '#FFD700' : 
         colorMode === 'community' 
@@ -152,11 +207,13 @@ export function GraphCanvas({
           : getDepthColor(nodeData.depth, maxDepth)
       );
     });
-  }, [colorMode, graph, data.seedId, data.communities.length, maxDepth]);
+  }, [colorMode, data, maxDepth]);
 
   // Highlight path when selected
   useEffect(() => {
     if (!sigmaRef.current) return;
+
+    const graph = graphRef.current;
 
     // Reset all edges
     graph.forEachEdge((edge, attrs, source, target) => {
@@ -176,19 +233,21 @@ export function GraphCanvas({
         }
       }
     }
-  }, [selectedPath, graph]);
+  }, [selectedPath]);
 
   // Focus on specific node
   useEffect(() => {
     if (!sigmaRef.current || !focusedNode) return;
     
     const camera = sigmaRef.current.getCamera();
-    const pos = data.positions[focusedNode];
+    const pos = graphRef.current.hasNode(focusedNode)
+      ? graphRef.current.getNodeAttributes(focusedNode)
+      : null;
     
     if (pos) {
       camera.animate({ x: pos.x, y: pos.y }, { duration: 300 });
     }
-  }, [focusedNode, data.positions]);
+  }, [focusedNode]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">

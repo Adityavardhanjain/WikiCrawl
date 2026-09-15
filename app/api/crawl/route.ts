@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { crawlWikipedia, buildGraph } from '@/lib/crawler';
 import { analyzeGraph } from '@/lib/graphAnalysis';
-import { computeLayout, normalizeLayout } from '@/lib/layout';
 import { getCachedResult, setCachedResult, generateCacheKey } from '@/lib/db';
 import { getPageExtract } from '@/lib/wikipedia';
 import { nanoid } from 'nanoid';
@@ -50,6 +49,10 @@ export async function POST(request: NextRequest) {
               crawlProgress.total = Math.max(total, 1);
               sendStreamEvent(controller, 'progress', { progress: crawlProgress });
             },
+            onBatch: (nodes, edges) => {
+              if (nodes.length > 0) sendStreamEvent(controller, 'nodes', { nodes });
+              if (edges.length > 0) sendStreamEvent(controller, 'edges', { edges });
+            },
           });
 
           const nodeMap = new Map<string, CrawlResult['nodes'][number]>();
@@ -82,6 +85,11 @@ export async function POST(request: NextRequest) {
           const seedId = baseGraph?.seedId ?? crawledSeedId;
           const { nodes: analyzedNodes, communities } = analyzeGraph(graph, seedId);
 
+          sendStreamEvent(controller, 'analysis', {
+            nodes: analyzedNodes,
+            communities,
+          });
+
           const topNodes = analyzedNodes
             .sort((a, b) => b.pagerank - a.pagerank)
             .slice(0, 20);
@@ -104,8 +112,9 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          const layout = computeLayout(graph, { iterations: Math.min(100, Math.max(32, 120 - nodes.length / 3)) });
-          const positions = normalizeLayout(layout, 1000, 800, 50);
+          sendStreamEvent(controller, 'extracts', { extracts });
+
+          const positions = baseGraph?.positions ?? {};
 
           const result: CrawlResult = {
             id: nanoid(),

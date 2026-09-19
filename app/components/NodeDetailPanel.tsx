@@ -20,9 +20,13 @@ export function NodeDetailPanel({
   if (!node || !data) return null;
 
   const community = data.communities.find(c => c.id === node.communityId);
+  const connectedNodes = data.nodes.filter((candidate) => data.edges.some((edge) => (
+    (edge.source === node.id && edge.target === candidate.id) ||
+    (edge.target === node.id && edge.source === candidate.id)
+  )));
 
   return (
-    <div className="absolute right-4 top-4 w-80 glass-strong rounded-2xl shadow-2xl overflow-hidden border border-cyan-500/20 animate-in slide-in-from-right">
+    <div className="node-detail absolute right-4 top-4 w-80 glass-strong rounded-2xl shadow-2xl overflow-hidden border border-cyan-500/20 animate-in slide-in-from-right">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-white/10 bg-gradient-to-r from-cyan-500/10 to-purple-500/10">
         <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -60,15 +64,27 @@ export function NodeDetailPanel({
           </p>
         )}
 
+        <div className="flex items-center gap-3 border-y border-white/10 py-3 text-xs text-slate-400">
+          <span><strong className="text-white">{connectedNodes.length}</strong> connections</span>
+          <span><strong className="text-white">{node.depth >= 0 ? node.depth : '?'}</strong> depth</span>
+        </div>
+
         {/* Metrics */}
         <div className="grid grid-cols-2 gap-2">
           <MetricCard label="PageRank" value={node.pagerank.toFixed(4)} color="cyan" />
-          <MetricCard label="Betweenness" value={node.betweenness.toFixed(4)} color="purple" />
-          <MetricCard label="In-Degree" value={node.inDegree.toString()} />
-          <MetricCard label="Out-Degree" value={node.outDegree.toString()} />
-          <MetricCard label="Depth" value={node.depth >= 0 ? node.depth.toString() : '?'} color="pink" />
-          <MetricCard label="Cluster" value={community?.label?.slice(0, 12) || `Group ${node.communityId}`} color="yellow" />
+          <MetricCard label="Cluster" value={community?.label?.slice(0, 18) || 'Unclustered'} color="yellow" />
         </div>
+
+        {connectedNodes.length > 0 && (
+          <div>
+            <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wide">Connected topics</h4>
+            <div className="space-y-1">
+              {connectedNodes.slice(0, 6).map((connectedNode) => (
+                <p key={connectedNode.id} className="truncate text-xs text-slate-300">{connectedNode.title}</p>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Community Members */}
         {community && community.size > 1 && (

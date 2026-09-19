@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Graph from 'graphology';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
@@ -44,7 +44,13 @@ function validateGraphData(data: Partial<CrawlResult> | null | undefined): strin
     issues.push('Graph is empty.');
   }
 
-  const validNodeIds = new Set(data.nodes.map((node) => node.id));
+  const nodeIds = data.nodes.map((node) => node?.id);
+  const duplicateNodeIds = new Set(nodeIds.filter((id, index) => id && nodeIds.indexOf(id) !== index));
+  if (duplicateNodeIds.size > 0) {
+    issues.push('Graph contains duplicate node IDs.');
+  }
+
+  const validNodeIds = new Set(nodeIds);
   for (const edge of data.edges ?? []) {
     if (!validNodeIds.has(edge.source) || !validNodeIds.has(edge.target)) {
       issues.push(`Edge references missing nodes: ${edge.source} -> ${edge.target}`);
@@ -158,26 +164,49 @@ export default function Home() {
   // State
   const [seedTitle, setSeedTitle] = useState('');
   const [depth, setDepth] = useState(3);
-  const [maxNodes, setMaxNodes] = useState(50);
+  const [maxNodes, setMaxNodes] = useState(500);
   const [colorMode, setColorMode] = useState<ColorMode>('community');
   const [selectedNode, setSelectedNode] = useState<WikiNode | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
+  const previousDataRef = useRef<CrawlResult | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [explorationHistory, setExplorationHistory] = useState<Array<{ id: string; title: string }>>([]);
+  const liveUpdateRef = useRef<((current: CrawlResult) => CrawlResult) | null>(null);
+  const liveUpdateFrameRef = useRef<number | null>(null);
 
   const mergeLiveData = useCallback((update: (current: CrawlResult) => CrawlResult) => {
-    setLiveData((current) => update(current ?? {
-      id: 'streaming',
-      seedId: seedTitle,
-      nodes: [],
-      edges: [],
-      communities: [],
-      crawledAt: new Date().toISOString(),
-      positions: {},
-    }));
+    const pendingUpdate = liveUpdateRef.current;
+    liveUpdateRef.current = pendingUpdate
+      ? (current) => update(pendingUpdate(current))
+      : update;
+
+    if (liveUpdateFrameRef.current !== null) return;
+
+    liveUpdateFrameRef.current = window.requestAnimationFrame(() => {
+      const pendingUpdate = liveUpdateRef.current;
+      liveUpdateRef.current = null;
+      liveUpdateFrameRef.current = null;
+      if (!pendingUpdate) return;
+
+      setLiveData((current) => pendingUpdate(current ?? {
+        id: 'streaming',
+        seedId: seedTitle,
+        nodes: [],
+        edges: [],
+        communities: [],
+        crawledAt: new Date().toISOString(),
+        positions: {},
+      }));
+    });
   }, [seedTitle]);
+
+  useEffect(() => () => {
+    if (liveUpdateFrameRef.current !== null) {
+      window.cancelAnimationFrame(liveUpdateFrameRef.current);
+    }
+  }, []);
 
   const updateLoadingProgress = useCallback((visited: number, total: number) => {
     const safeTotal = Math.max(total, 1);
@@ -195,18 +224,18 @@ export default function Home() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ seedTitle, depth, maxNodes }),
         });
-        return await readCrawlResponse(response, updateLoadingProgress, {
+        const result = await readCrawlResponse(response, updateLoadingProgress, {
           onNodes: (nodes) => mergeLiveData((current) => ({
             ...current,
-            nodes: Array.from(new Map([...current.nodes, ...nodes].map((node) => [node.id, node])).values()),
+            nodes: Array.from(new Map([...current.nodes, ...nodes].filter((node) => node?.id).map((node) => [node.id, node])).values()),
           })),
           onEdges: (edges) => mergeLiveData((current) => ({
             ...current,
-            edges: Array.from(new Map([...current.edges, ...edges].map((edge) => [`${edge.source}|${edge.target}`, edge])).values()),
+            edges: Array.from(new Map([...current.edges, ...edges].filter((edge) => edge?.source && edge?.target).map((edge) => [`${edge.source}|${edge.target}`, edge])).values()),
           })),
           onAnalysis: (nodes, communities) => mergeLiveData((current) => ({
             ...current,
-            nodes: Array.from(new Map([...current.nodes, ...nodes].map((node) => [node.id, node])).values()),
+            nodes: Array.from(new Map([...current.nodes, ...nodes].filter((node) => node?.id).map((node) => [node.id, node])).values()),
             communities,
           })),
           onExtracts: (extracts) => mergeLiveData((current) => ({
@@ -217,6 +246,9 @@ export default function Home() {
             }),
           })),
         });
+        const issues = validateGraphData(result);
+        if (issues.length > 0) throw new Error(issues[0]);
+        return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to explore this topic right now.';
         setGraphError(message);
@@ -227,7 +259,7 @@ export default function Home() {
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
 
-  const displayData = data ?? liveData;
+  const displayData = data ?? liveData ?? previousDataRef.current;
 
   useEffect(() => {
     if (!displayData) return;
@@ -278,24 +310,37 @@ export default function Home() {
         }),
       });
       
-      return readCrawlResponse(response);
+      const result = await readCrawlResponse(response);
+      const issues = validateGraphData(result);
+      if (issues.length > 0) throw new Error(issues[0]);
+      return result;
     },
     onSuccess: (newData) => {
       if (displayData) {
         queryClient.setQueryData(['crawl', seedTitle, depth, maxNodes], newData);
       }
     },
+    onError: (error) => {
+      setGraphError(error instanceof Error ? error.message : 'Could not explore this page.');
+    },
   });
 
   // Handle search
   const handleSearch = useCallback((title: string) => {
+    previousDataRef.current = data ?? liveData;
+    const url = new URL(window.location.href);
+    url.searchParams.set('seed', title);
+    url.searchParams.set('depth', depth.toString());
+    url.searchParams.set('nodes', maxNodes.toString());
+    window.history.replaceState({}, '', url.toString());
+    queryClient.removeQueries({ queryKey: ['crawl'] });
     setSeedTitle(title);
     setLiveData(null);
     setGraphError(null);
     setSelectedNode(null);
     setFocusedNode(null);
     setExplorationHistory([]);
-  }, []);
+  }, [data, depth, liveData, maxNodes, queryClient]);
 
   useEffect(() => {
     if (seedTitle) {
@@ -336,7 +381,7 @@ export default function Home() {
 
   // Shareable URL
   useEffect(() => {
-    if (displayData && displayData.seedId) {
+    if (displayData && displayData.seedId && displayData.seedId === seedTitle) {
       const url = new URL(window.location.href);
       url.searchParams.set('seed', displayData.seedId);
       url.searchParams.set('depth', depth.toString());
@@ -360,14 +405,14 @@ export default function Home() {
   }, [refetch]);
 
   useEffect(() => {
-    if (!displayData) return;
-    const issues = validateGraphData(displayData);
+    if (!data) return;
+    const issues = validateGraphData(data);
     if (issues.length > 0) {
       setGraphError(issues[0]);
       setSelectedNode(null);
       setFocusedNode(null);
     }
-  }, [displayData]);
+  }, [data]);
 
   return (
     <div className="app-shell h-screen flex flex-col relative overflow-hidden">
@@ -483,7 +528,7 @@ export default function Home() {
             </div>
           )}
 
-          {error && (
+          {error && !displayData && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center p-8 glass-strong rounded-2xl max-w-md border border-red-500/30">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
@@ -557,57 +602,59 @@ export default function Home() {
 
           {graphError && displayData && (
             <div className="absolute inset-x-0 bottom-6 z-30 flex justify-center px-4">
-              <div className="max-w-md rounded-2xl border border-amber-500/30 bg-slate-950/85 px-4 py-3 text-sm text-amber-200 shadow-xl backdrop-blur-md">
-                {graphError}
+              <div className="flex max-w-lg items-center gap-4 rounded-2xl border border-amber-500/30 bg-slate-950/85 px-4 py-3 text-sm text-amber-200 shadow-xl backdrop-blur-md">
+                <span>{graphError}</span>
+                <button type="button" onClick={() => refetch()} className="shrink-0 text-xs font-semibold uppercase tracking-wide text-cyan-300 hover:text-white">
+                  Retry
+                </button>
               </div>
             </div>
           )}
 
           {!displayData && !isLoading && !error && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center max-w-lg">
+              <div className="atlas-empty-state text-center max-w-xl">
                 {/* Animated icon */}
-                <div className="relative mx-auto mb-8 w-32 h-32">
-                  <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-3xl blur-xl opacity-30 animate-pulse" />
-                  <div className="relative w-full h-full bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl border border-white/10 flex items-center justify-center">
+                <div className="relative mx-auto mb-7 w-24 h-24">
+                  <div className="relative w-full h-full bg-slate-900/70 rounded-full border border-cyan-400/30 flex items-center justify-center">
                     <svg className="w-16 h-16 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
                     </svg>
                   </div>
                 </div>
                 
-                <h2 className="text-3xl font-bold mb-4">
+                <h2 className="text-3xl font-semibold mb-3">
                   <span className="gradient-text">Start Your Journey</span>
                 </h2>
-                <p className="text-slate-400 text-lg mb-8">
+                <p className="text-slate-400 text-base mb-7">
                   Enter any Wikipedia article above and watch as connections between topics come alive through interactive visualization
                 </p>
                 
                 {/* Feature highlights */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="glass rounded-xl p-4 card-hover">
-                    <div className="w-10 h-10 mx-auto mb-2 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+                <div className="flex flex-wrap justify-center gap-x-6 gap-y-3">
+                  <div className="flex items-center gap-2 text-sm text-slate-300">
+                    <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center">
                       <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
                       </svg>
                     </div>
-                    <p className="text-sm text-slate-300">Explore Links</p>
+                    <p>Explore Links</p>
                   </div>
-                  <div className="glass rounded-xl p-4 card-hover">
-                    <div className="w-10 h-10 mx-auto mb-2 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                  <div className="flex items-center gap-2 text-sm text-slate-300">
+                    <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center">
                       <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                       </svg>
                     </div>
-                    <p className="text-sm text-slate-300">Find Communities</p>
+                    <p>Find Communities</p>
                   </div>
-                  <div className="glass rounded-xl p-4 card-hover">
-                    <div className="w-10 h-10 mx-auto mb-2 rounded-lg bg-pink-500/20 flex items-center justify-center">
+                  <div className="flex items-center gap-2 text-sm text-slate-300">
+                    <div className="w-6 h-6 rounded-full bg-pink-500/20 flex items-center justify-center">
                       <svg className="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                       </svg>
                     </div>
-                    <p className="text-sm text-slate-300">Shortest Paths</p>
+                    <p>Shortest Paths</p>
                   </div>
                 </div>
               </div>

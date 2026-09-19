@@ -110,6 +110,8 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
     e.preventDefault();
     if (selectedIndex >= 0 && suggestions[selectedIndex]) {
       handleSelect(suggestions[selectedIndex].title);
+    } else if (query.trim()) {
+      handleSelect(query.trim());
     }
   };
 

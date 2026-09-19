@@ -13,17 +13,29 @@ interface SidebarProps {
 
 export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<'pagerank' | 'communities'>('pagerank');
+  const selectedNode = data.nodes.find((node) => node.id === focusedNode) ?? null;
+  const meaningfulCommunities = data.communities.filter((community) => community.size > 1);
   
   const topPages = useMemo(
     () => [...data.nodes].sort((a, b) => b.pagerank - a.pagerank).slice(0, 10),
     [data.nodes]
   );
 
+  const connectedPages = useMemo(() => {
+    if (!selectedNode) return [];
+    const connectedIds = new Set<string>();
+    for (const edge of data.edges) {
+      if (edge.source === selectedNode.id) connectedIds.add(edge.target);
+      if (edge.target === selectedNode.id) connectedIds.add(edge.source);
+    }
+    return data.nodes.filter((node) => connectedIds.has(node.id)).slice(0, 8);
+  }, [data.edges, data.nodes, selectedNode]);
+
   return (
-    <aside className="w-80 glass-strong border-l border-white/10 flex flex-col overflow-hidden">
+    <aside className="atlas-sidebar w-80 glass-strong border-l border-white/10 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="px-4 py-4 border-b border-white/10">
-        <div className="flex items-center gap-3 mb-3">
+        <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-500 p-[2px]">
             <div className="w-full h-full bg-slate-900 rounded-lg flex items-center justify-center">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -33,25 +45,23 @@ export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: 
           </div>
           <div>
             <h2 className="text-lg font-bold text-white">WikiCrawl</h2>
-            <p className="text-xs text-slate-400">Graph Explorer</p>
+            <p className="text-xs text-slate-400">Atlas of Wikipedia knowledge</p>
           </div>
         </div>
-        
-        {/* Quick stats */}
-        <div className="flex gap-2">
-          <div className="flex-1 glass rounded-lg p-2 text-center">
-            <div className="text-lg font-bold gradient-text">{data.nodes.length}</div>
-            <div className="text-[10px] text-slate-400 uppercase tracking-wide">Nodes</div>
+        {selectedNode ? (
+          <div className="atlas-context">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-400 mb-2">Current location</p>
+            <h3 className="text-lg font-semibold text-white leading-tight">{selectedNode.title}</h3>
+            <p className="mt-2 text-xs text-slate-400">
+              {connectedPages.length} connections · depth {selectedNode.depth >= 0 ? selectedNode.depth : '?'}
+            </p>
           </div>
-          <div className="flex-1 glass rounded-lg p-2 text-center">
-            <div className="text-lg font-bold text-white">{data.edges.length}</div>
-            <div className="text-[10px] text-slate-400 uppercase tracking-wide">Edges</div>
+        ) : (
+          <div className="atlas-context">
+            <p className="text-sm text-slate-300">Explore the map.</p>
+            <p className="mt-1 text-xs text-slate-500">{data.nodes.length} pages · {data.edges.length} connections</p>
           </div>
-          <div className="flex-1 glass rounded-lg p-2 text-center">
-            <div className="text-lg font-bold text-purple-400">{data.communities.length}</div>
-            <div className="text-[10px] text-slate-400 uppercase tracking-wide">Clusters</div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -73,6 +83,7 @@ export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: 
         </button>
         <button
           onClick={() => setActiveTab('communities')}
+          disabled={meaningfulCommunities.length === 0}
           className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
             activeTab === 'communities'
               ? 'text-white bg-gradient-to-b from-purple-500/20 to-transparent'
@@ -132,7 +143,7 @@ export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: 
           </div>
         ) : (
           <div className="space-y-1">
-            {data.communities.slice(0, 15).map((community) => (
+            {meaningfulCommunities.slice(0, 15).map((community) => (
               <button
                 key={community.id}
                 onClick={() => onCommunitySelect(community.id)}
@@ -162,11 +173,33 @@ export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: 
         )}
       </div>
 
+      {selectedNode && connectedPages.length > 0 && (
+        <div className="atlas-related border-t border-white/10 px-4 py-4">
+          <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">Connected topics</p>
+          <div className="space-y-1">
+            {connectedPages.slice(0, 5).map((node) => (
+              <button
+                key={node.id}
+                onClick={() => onNodeSelect(node.id)}
+                className="block w-full truncate text-left text-xs text-slate-300 transition-colors hover:text-cyan-300"
+              >
+                {node.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
-      <div className="p-3 border-t border-white/10 bg-gradient-to-t from-white/5 to-transparent">
+      <div className="atlas-footer p-4 border-t border-white/10">
         <p className="text-[11px] text-slate-500 text-center">
           Crawled {new Date(data.crawledAt).toLocaleDateString()}
         </p>
+        <div className="mt-3 flex justify-center gap-3 text-[11px]">
+          <a className="text-slate-400 transition-colors hover:text-cyan-300" href="mailto:jainadityavardhan@gmail.com?subject=WikiCrawl%20Feedback">Feedback</a>
+          <a className="text-slate-400 transition-colors hover:text-cyan-300" href="https://www.linkedin.com/in/adityavardhan-jain/" target="_blank" rel="noopener noreferrer" aria-label="Adityavardhan Jain on LinkedIn">LinkedIn</a>
+        </div>
+        <p className="mt-2 text-center text-[10px] text-slate-600">Created by Adityavardhan Jain</p>
       </div>
     </aside>
   );

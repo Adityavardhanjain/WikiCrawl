@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       async start(controller) {
         try {
           let crawlProgress: CrawlProgress = { done: 0, target: 1 };
-          const { nodes: crawledNodes, edges: crawledEdges, seedId: crawledSeedId } = await crawlWikipedia({
+          const { nodes: crawledNodes, edges: crawledEdges, seedId: crawledSeedId, partial, failedTitles } = await crawlWikipedia({
             seedTitle,
             depth: validatedDepth,
             maxNodes: validatedMaxNodes,
@@ -64,6 +64,10 @@ export async function POST(request: NextRequest) {
               if (edges.length > 0) sendStreamEvent(controller, 'edges', { edges });
             },
           });
+
+          if (partial) {
+            sendStreamEvent(controller, 'warning', { failedTitles });
+          }
 
           const nodeMap = new Map<string, CrawlResult['nodes'][number]>();
           for (const node of baseGraph?.nodes ?? []) {
@@ -136,9 +140,11 @@ export async function POST(request: NextRequest) {
             crawledAt: new Date().toISOString(),
             positions,
             progress: { done: 1, target: 1 },
+            partial,
+            failedTitles,
           };
 
-          if (!baseGraph) {
+          if (!baseGraph && !partial) {
             setCachedResult(cacheKey, seedTitle, validatedDepth, validatedMaxNodes, result);
           }
           sendStreamEvent(controller, 'done', { result });

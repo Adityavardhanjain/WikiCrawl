@@ -112,4 +112,16 @@ describe('offline crawler', () => {
       mock.restore();
     }
   });
+
+  it('keeps edges whose link target is resolved from a redirect', async () => {
+    const mock = installMockMediaWiki();
+
+    try {
+      const result = await crawlWikipedia({ seedTitle: 'Page 0', depth: 1, maxNodes: 3 });
+      expect(result.nodes.map((node) => node.id)).toContain('Page 1');
+      expect(result.edges).toContainEqual({ source: 'Page 0', target: 'Page 1' });
+    } finally {
+      mock.restore();
+    }
+  });
 });

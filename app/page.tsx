@@ -105,6 +105,7 @@ async function readCrawlResponse(
     onEdges?: (edges: WikiEdge[]) => void;
     onAnalysis?: (nodes: WikiNode[], communities: Community[]) => void;
     onExtracts?: (extracts: { nodeId: string; extract: string | null }[]) => void;
+    onWarning?: (failedTitles: string[]) => void;
   }
 ): Promise<CrawlResult> {
   if (!response.ok) {
@@ -150,6 +151,7 @@ async function readCrawlResponse(
       if (event === 'edges') handlers?.onEdges?.(payload.edges ?? []);
       if (event === 'analysis') handlers?.onAnalysis?.(payload.nodes ?? [], payload.communities ?? []);
       if (event === 'extracts') handlers?.onExtracts?.(payload.extracts ?? []);
+      if (event === 'warning') handlers?.onWarning?.(payload.failedTitles ?? []);
       if (payload?.result) {
         finalResult = payload.result as CrawlResult;
         if (event === 'done') onProgress?.({ done: 1, target: 1 });
@@ -185,6 +187,7 @@ export default function Home() {
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
   const previousDataRef = useRef<CrawlResult | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
+  const [crawlWarning, setCrawlWarning] = useState<number | null>(null);
   const [notFound, setNotFound] = useState<{ title: string; suggestions: string[] } | null>(null);
   const [explorationHistory, setExplorationHistory] = useState<Array<{ id: string; title: string }>>([]);
   const liveUpdateRef = useRef<((current: CrawlResult) => CrawlResult) | null>(null);
@@ -265,6 +268,7 @@ export default function Home() {
               return extract ? { ...node, extract } : node;
             }),
           })),
+          onWarning: (failedTitles) => setCrawlWarning(failedTitles.length),
         });
         const issues = validateGraphData(result);
         if (issues.length > 0) throw new Error(issues[0]);
@@ -376,6 +380,7 @@ export default function Home() {
     setLiveData(null);
     setLoadingProgress(0);
     setGraphError(null);
+    setCrawlWarning(null);
     setNotFound(null);
     setSelectedNode(null);
     setFocusedNode(null);
@@ -387,6 +392,7 @@ export default function Home() {
     setSelectedNode(node);
     setFocusedNode(node.id);
     setGraphError(null);
+    setCrawlWarning(null);
   }, []);
 
   // Handle node selection from sidebar
@@ -656,6 +662,20 @@ export default function Home() {
                 <span>{graphError}</span>
                 <button type="button" onClick={() => refetch()} className="shrink-0 text-xs font-semibold uppercase tracking-wide text-cyan-300 hover:text-white">
                   Retry
+                </button>
+              </div>
+            </div>
+          )}
+
+          {crawlWarning !== null && displayData && (
+            <div className="absolute inset-x-0 top-6 z-30 flex justify-center px-4">
+              <div className="flex max-w-xl items-center gap-4 rounded-2xl border border-amber-500/30 bg-slate-950/90 px-4 py-3 text-sm text-amber-200 shadow-xl backdrop-blur-md">
+                <span>Some pages could not be fetched ({crawlWarning}). Results may be incomplete.</span>
+                <button type="button" onClick={() => refetch()} className="shrink-0 text-xs font-semibold uppercase tracking-wide text-cyan-300 hover:text-white">
+                  Retry
+                </button>
+                <button type="button" aria-label="Dismiss warning" onClick={() => setCrawlWarning(null)} className="shrink-0 text-lg leading-none text-slate-400 hover:text-white">
+                  ×
                 </button>
               </div>
             </div>

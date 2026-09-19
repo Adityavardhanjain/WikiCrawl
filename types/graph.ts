@@ -37,6 +37,8 @@ export interface CrawlResult {
   crawledAt: string;
   positions: { [key: string]: { x: number; y: number } };
   progress?: CrawlProgress;
+  partial?: boolean;
+  failedTitles?: string[];
 }
 
 export interface SearchResult {

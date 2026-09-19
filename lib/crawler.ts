@@ -1,19 +1,20 @@
 import Graph from 'graphology';
 import { getPageLinksBatch, titleToUrl } from './wikipedia';
+import { isJunkTitle } from './filters';
 import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
 
 const WIKIPEDIA_BATCH_SIZE = 8;
-const MAX_EDGES_PER_NODE = 50;
+const PAGE_LINK_LIMIT: number | undefined = undefined;
 const MAX_REQUEST_BUDGET = 500;
 
 interface CrawlState {
   nodes: WikiNode[];
   nodeIds: Set<string>;
-  edges: WikiEdge[];
-  edgeKeys: Set<string>;
+  linksByNode: Map<string, string[]>;
   visited: Set<string>;
   queue: { title: string; depth: number }[];
   resolvedTitles: Map<string, string>;
+  failedTitles: Set<string>;
 }
 
 export function getCrawlRequestBudget(maxNodes: number, depth: number): number {
@@ -29,6 +30,7 @@ export function shouldQueuePage(
 ): boolean {
   const normalized = normalizeTitle(title);
   if (!normalized) return false;
+  if (isJunkTitle(normalized)) return false;
   if (visited.has(normalized) || queued.has(normalized)) return false;
   return true;
 }
@@ -38,10 +40,13 @@ function normalizeTitle(title: string): string {
 }
 
 function getCanonicalTitle(title: string, resolvedTitles: Map<string, string>): string {
-  const normalized = normalizeTitle(title);
-  // Check if we have a resolved title
-  const resolved = resolvedTitles.get(normalized);
-  return resolved || normalized;
+  let canonical = normalizeTitle(title);
+  const seen = new Set<string>();
+  while (resolvedTitles.has(canonical) && !seen.has(canonical)) {
+    seen.add(canonical);
+    canonical = normalizeTitle(resolvedTitles.get(canonical)!);
+  }
+  return canonical;
 }
 
 export interface CrawlOptions {
@@ -56,27 +61,29 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   nodes: WikiNode[];
   edges: WikiEdge[];
   seedId: string;
+  partial: boolean;
+  failedTitles: string[];
 }> {
   const { seedTitle, depth, maxNodes, onProgress, onBatch } = options;
   const requestBudget = getCrawlRequestBudget(maxNodes, depth);
-  const pageLinkLimit = Math.min(300, Math.max(120, maxNodes));
-
   const progress: CrawlState = {
     nodes: [],
     nodeIds: new Set(),
-    edges: [],
-    edgeKeys: new Set<string>(),
+    linksByNode: new Map(),
     visited: new Set(),
     queue: [],
     resolvedTitles: new Map(),
+    failedTitles: new Set(),
   };
 
   const queuedTitles = new Set<string>();
 
   // Start with the seed page
   const seedNormalized = normalizeTitle(seedTitle);
-  progress.queue.push({ title: seedNormalized, depth: 0 });
-  queuedTitles.add(seedNormalized);
+  if (!isJunkTitle(seedNormalized)) {
+    progress.queue.push({ title: seedNormalized, depth: 0 });
+    queuedTitles.add(seedNormalized);
+  }
 
   let progressTarget = 1;
   let activeWork = 0;
@@ -98,14 +105,31 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     activeWork = batch.length;
 
     const batchTitles = batch.map(({ title }) => title);
-    const batchNodeIds = new Set(progress.nodes.map((node) => node.id));
-    const batchEdgeKeys = new Set(progress.edges.map((edge) => `${edge.source}|${edge.target}`));
-    let batchResponse;
-    try {
-      batchResponse = await getPageLinksBatch(batchTitles);
-      requestsUsed += 1;
-    } catch {
+    const fetchBatch = async (continueToken?: string) => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const response = await getPageLinksBatch(batchTitles, continueToken);
+          requestsUsed += 1;
+          return response;
+        } catch {
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+      for (const title of batchTitles) progress.failedTitles.add(title);
+      return null;
+    };
+
+    const batchResponse = await fetchBatch();
+    if (!batchResponse) {
+      activeWork = 0;
       continue;
+    }
+
+    const batchNodeIds = new Set(progress.nodes.map((node) => node.id));
+    for (const page of batchResponse.pages) {
+      const normalizedTitle = normalizeTitle(page.title);
+      const resolvedTitle = normalizeTitle(page.resolvedTitle);
+      if (resolvedTitle !== normalizedTitle) progress.resolvedTitles.set(normalizedTitle, resolvedTitle);
     }
     const batchResults = batch.map(({ title, depth: currentDepth }) => {
       const canonicalTitle = getCanonicalTitle(title, progress.resolvedTitles);
@@ -122,6 +146,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     });
 
     const collectedLinks = new Map<string, number>();
+    const batchCanonicalTitles = new Set<string>();
 
     for (const item of batchResults) {
       if (!item) {
@@ -130,20 +155,17 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
       }
 
       const { title, currentDepth, result, canonicalTitle } = item;
-      if (progress.visited.has(canonicalTitle)) {
+      if (progress.visited.has(canonicalTitle) || batchCanonicalTitles.has(canonicalTitle)) {
         activeWork -= 1;
         continue;
       }
 
+      batchCanonicalTitles.add(canonicalTitle);
       progress.visited.add(canonicalTitle);
-
-      if (result.resolvedTitle !== normalizeTitle(title)) {
-        progress.resolvedTitles.set(normalizeTitle(title), result.resolvedTitle);
-      }
-
-      const links = result.links.slice(0, Math.min(pageLinkLimit, result.links.length));
+      const links = PAGE_LINK_LIMIT === undefined ? result.links : result.links.slice(0, PAGE_LINK_LIMIT);
       collectedLinks.set(title, links.length);
-      const nodeId = getCanonicalTitle(title, progress.resolvedTitles);
+      const nodeId = canonicalTitle;
+      progress.linksByNode.set(nodeId, [...(progress.linksByNode.get(nodeId) ?? []), ...links.map(normalizeTitle)]);
 
       if (!progress.nodeIds.has(nodeId)) {
         progress.nodes.push({
@@ -153,7 +175,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
           extract: '',
           depth: currentDepth,
           inDegree: 0,
-          outDegree: links.length,
+          outDegree: 0,
           pagerank: 0,
           betweenness: 0,
           communityId: 0,
@@ -162,23 +184,11 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
       }
 
       if (currentDepth < depth) {
-          for (let linkIndex = 0; linkIndex < links.length; linkIndex++) {
-            const link = links[linkIndex];
+        for (const link of links) {
           const normalizedLink = normalizeTitle(link);
           const canonicalLink = getCanonicalTitle(normalizedLink, progress.resolvedTitles);
-
-            if (linkIndex < MAX_EDGES_PER_NODE) {
-              const edgeKey = `${nodeId}|${canonicalLink}`;
-              if (!progress.edgeKeys.has(edgeKey)) {
-                progress.edgeKeys.add(edgeKey);
-                progress.edges.push({
-                  source: nodeId,
-                  target: canonicalLink,
-                });
-              }
-          }
-
           if (
+            !isJunkTitle(normalizedLink) &&
             !progress.visited.has(canonicalLink) &&
             progress.nodes.length < maxNodes &&
             shouldQueuePage(normalizedLink, progress.visited, queuedTitles)
@@ -194,13 +204,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
     }
 
-    onBatch?.(
-      progress.nodes.filter((node) => !batchNodeIds.has(node.id)),
-      progress.edges.filter((edge) => !batchEdgeKeys.has(`${edge.source}|${edge.target}`)),
-    );
-    for (const edge of progress.edges) {
-      batchEdgeKeys.add(`${edge.source}|${edge.target}`);
-    }
+    onBatch?.(progress.nodes.filter((node) => !batchNodeIds.has(node.id)), []);
 
     let continueToken = batchResponse.continueToken;
     while (
@@ -208,13 +212,10 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
       progress.nodes.length < maxNodes &&
       requestsUsed < requestBudget &&
       batchResults.some((item) => item !== null && item.currentDepth < depth) &&
-      Array.from(collectedLinks.values()).some((count) => count < pageLinkLimit)
+      (PAGE_LINK_LIMIT === undefined || Array.from(collectedLinks.values()).some((count) => count < PAGE_LINK_LIMIT))
     ) {
-      let paginatedResponse;
-      try {
-        paginatedResponse = await getPageLinksBatch(batchTitles, continueToken);
-        requestsUsed += 1;
-      } catch {
+      const paginatedResponse = await fetchBatch(continueToken);
+      if (!paginatedResponse) {
         break;
       }
 
@@ -225,27 +226,24 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
           currentCount === undefined ||
           !item ||
           item.currentDepth >= depth ||
-          currentCount >= pageLinkLimit
+          (PAGE_LINK_LIMIT !== undefined && currentCount >= PAGE_LINK_LIMIT)
         ) continue;
 
-        const remaining = pageLinkLimit - currentCount;
+        const remaining = PAGE_LINK_LIMIT === undefined ? paginatedResult.links.length : PAGE_LINK_LIMIT - currentCount;
+        if (remaining <= 0) continue;
         const paginatedLinks = paginatedResult.links.slice(0, remaining);
         const nodeId = getCanonicalTitle(item.title, progress.resolvedTitles);
+        progress.linksByNode.set(nodeId, [
+          ...(progress.linksByNode.get(nodeId) ?? []),
+          ...paginatedLinks.map(normalizeTitle),
+        ]);
 
-        for (let linkIndex = 0; linkIndex < paginatedLinks.length; linkIndex++) {
-          const link = paginatedLinks[linkIndex];
+        for (const link of paginatedLinks) {
           const normalizedLink = normalizeTitle(link);
           const canonicalLink = getCanonicalTitle(normalizedLink, progress.resolvedTitles);
 
-          if (currentCount + linkIndex < MAX_EDGES_PER_NODE) {
-            const edgeKey = `${nodeId}|${canonicalLink}`;
-            if (!progress.edgeKeys.has(edgeKey)) {
-              progress.edgeKeys.add(edgeKey);
-              progress.edges.push({ source: nodeId, target: canonicalLink });
-            }
-          }
-
           if (
+            !isJunkTitle(normalizedLink) &&
             !progress.visited.has(canonicalLink) &&
             progress.nodes.length < maxNodes &&
             shouldQueuePage(normalizedLink, progress.visited, queuedTitles)
@@ -258,23 +256,28 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
         collectedLinks.set(paginatedResult.title, currentCount + paginatedLinks.length);
       }
 
-      onBatch?.(
-        [],
-        progress.edges.filter((edge) => !batchEdgeKeys.has(`${edge.source}|${edge.target}`)),
-      );
-      for (const edge of progress.edges) {
-        batchEdgeKeys.add(`${edge.source}|${edge.target}`);
-      }
-
       continueToken = paginatedResponse.continueToken;
     }
   }
 
-  // Keep only edges between pages that were actually crawled. This prevents
-  // uncrawled link targets from inflating analysis and layout with leaf nodes.
-  progress.edges = progress.edges.filter((edge) => (
-    progress.nodeIds.has(edge.source) && progress.nodeIds.has(edge.target)
-  ));
+  const edgeKeys = new Set<string>();
+  const edges: WikiEdge[] = [];
+  for (const [source, links] of progress.linksByNode) {
+    if (isJunkTitle(source)) continue;
+    for (const link of links) {
+      const target = getCanonicalTitle(link, progress.resolvedTitles);
+      if (isJunkTitle(target) || !progress.nodeIds.has(target)) continue;
+      const edgeKey = `${source}|${target}`;
+      if (source !== target && !edgeKeys.has(edgeKey)) {
+        edgeKeys.add(edgeKey);
+        edges.push({ source, target });
+      }
+    }
+  }
+  for (const node of progress.nodes) {
+    node.outDegree = edges.filter((edge) => edge.source === node.id).length;
+  }
+  onBatch?.([], edges);
 
   if (progress.queue.length === 0) {
     emitProgress(true);
@@ -282,7 +285,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
   // Calculate in-degrees
   const inDegreeMap = new Map<string, number>();
-  for (const edge of progress.edges) {
+  for (const edge of edges) {
     inDegreeMap.set(edge.target, (inDegreeMap.get(edge.target) || 0) + 1);
   }
 
@@ -294,8 +297,10 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   const resolvedSeedId = getCanonicalTitle(seedTitle, progress.resolvedTitles);
   return {
     nodes: progress.nodes,
-    edges: progress.edges,
+    edges,
     seedId: resolvedSeedId,
+    partial: progress.failedTitles.size > 0,
+    failedTitles: [...progress.failedTitles],
   };
 }
 

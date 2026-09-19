@@ -21,7 +21,7 @@ function normalizeTitle(title: string): string {
 }
 
 function pageNumber(title: string): number | null {
-  const match = normalizeTitle(title).match(/^Page (\d+)$/);
+  const match = normalizeTitle(title).match(/^(?:Page|Redirect) (\d+)$/);
   return match ? Number(match[1]) : null;
 }
 
@@ -29,15 +29,20 @@ function isKnownPage(title: string): boolean {
   return pageNumber(title) !== null;
 }
 
+function canonicalTitle(title: string): string {
+  const normalized = normalizeTitle(title);
+  return normalized.replace(/^Redirect /, 'Page ');
+}
+
 function defaultLinks(title: string): string[] {
-  const number = pageNumber(title) ?? 0;
+  const number = pageNumber(canonicalTitle(title)) ?? 0;
   const count = number === 0 ? 650 : 120;
-  return Array.from({ length: count }, (_, index) => `Page ${number + index + 1}`)
+  return Array.from({ length: count }, (_, index) => `${index === 0 ? 'Redirect' : 'Page'} ${number + (index === 0 ? 1 : index)}`)
     .sort((left, right) => left.localeCompare(right));
 }
 
 function topicalLinks(title: string): string[] {
-  const number = pageNumber(title) ?? 0;
+  const number = pageNumber(canonicalTitle(title)) ?? 0;
   const cluster = number % 4;
   return Array.from({ length: 120 }, (_, index) => {
     const offset = index % 5 === 0 ? index + 1 : cluster * 30 + index;
@@ -58,12 +63,13 @@ function responseFor(
       if (!isKnownPage(normalizedTitle)) {
         return { title: normalizedTitle, missing: true };
       }
-      const links = mode === 'topical' ? topicalLinks(normalizedTitle) : defaultLinks(normalizedTitle);
+      const canonical = canonicalTitle(normalizedTitle);
+      const links = mode === 'topical' ? topicalLinks(canonical) : defaultLinks(canonical);
       const pageLinks = links.slice(offset, offset + LINKS_PER_REQUEST);
       stats.linkRowsDownloaded += pageLinks.length;
       return {
         pageid: pageNumber(normalizedTitle)!,
-        title: normalizedTitle,
+        title: canonical,
         links: pageLinks.map((link) => ({ title: link })),
       };
     })
@@ -71,12 +77,16 @@ function responseFor(
 
   const hasMore = titles.some((title) => {
     if (!isKnownPage(title)) return false;
-    const links = mode === 'topical' ? topicalLinks(title) : defaultLinks(title);
+    const links = mode === 'topical' ? topicalLinks(canonicalTitle(title)) : defaultLinks(canonicalTitle(title));
     return offset + LINKS_PER_REQUEST < links.length;
   });
 
   return Response.json({
-    query: { pages },
+    query: {
+      pages,
+      redirects: titles.filter((title) => /^Redirect \d+$/.test(normalizeTitle(title)))
+        .map((title) => ({ from: normalizeTitle(title), to: canonicalTitle(title) })),
+    },
     ...(hasMore ? { continue: { plcontinue: String(offset + LINKS_PER_REQUEST) } } : {}),
   });
 }

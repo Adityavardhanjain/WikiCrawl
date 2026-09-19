@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import type { Community, CrawlProgress, CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
 import { createCrawlRequest, getCrawlPayload, parseCrawlParams, type CrawlRequest } from '@/lib/crawlRequest';
+import { mergeGraphData } from '@/lib/graphSync';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
 import { MemoizedSidebar } from './components/Sidebar';
@@ -362,10 +363,9 @@ export default function Home() {
     onSuccess: (newData) => {
       if (displayData) {
         if (submittedRequest) {
-          queryClient.setQueryData(
-            ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce],
-            newData,
-          );
+          const queryKey = ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce];
+          const currentData = queryClient.getQueryData<CrawlResult>(queryKey) ?? displayData;
+          queryClient.setQueryData(queryKey, mergeGraphData(currentData, newData));
         }
       }
     },

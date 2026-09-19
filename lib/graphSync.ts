@@ -2,6 +2,26 @@ import type Graph from 'graphology';
 import type { CrawlResult, WikiNode } from '@/types/graph';
 import { positionNearNeighbors } from './layoutSeed';
 
+export function mergeGraphData(base: CrawlResult, update: CrawlResult): CrawlResult {
+  const nodes = new Map(base.nodes.map((node) => [node.id, node]));
+  for (const node of update.nodes) {
+    nodes.set(node.id, { ...nodes.get(node.id), ...node });
+  }
+
+  const edges = new Map(base.edges.map((edge) => [`${edge.source}|${edge.target}`, edge]));
+  for (const edge of update.edges) {
+    edges.set(`${edge.source}|${edge.target}`, edge);
+  }
+
+  return {
+    ...base,
+    ...update,
+    nodes: [...nodes.values()],
+    edges: [...edges.values()],
+    positions: { ...base.positions, ...update.positions },
+  };
+}
+
 interface GraphNodeAttributes {
   x: number;
   y: number;

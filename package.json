@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "bench": "vitest bench tests/crawl.bench.ts",
+    "bench": "vitest bench tests",
     "lint": "eslint .",
     "probe:wikipedia": "tsx scripts/probe-wikipedia.ts",
     "test": "vitest run",

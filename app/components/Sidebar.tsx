@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { CrawlResult } from '@/types/graph';
 import { getCommunityColor } from '@/lib/graphAnalysis';
+import { buildAdjacency } from '@/lib/adjacency';
 
 interface SidebarProps {
   data: CrawlResult;
@@ -11,7 +12,7 @@ interface SidebarProps {
   focusedNode: string | null;
 }
 
-export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: SidebarProps) {
+function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<'pagerank' | 'communities'>('pagerank');
   const selectedNode = data.nodes.find((node) => node.id === focusedNode) ?? null;
   const meaningfulCommunities = data.communities.filter((community) => community.size > 1);
@@ -23,12 +24,11 @@ export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: 
 
   const connectedPages = useMemo(() => {
     if (!selectedNode) return [];
-    const connectedIds = new Set<string>();
-    for (const edge of data.edges) {
-      if (edge.source === selectedNode.id) connectedIds.add(edge.target);
-      if (edge.target === selectedNode.id) connectedIds.add(edge.source);
-    }
-    return data.nodes.filter((node) => connectedIds.has(node.id)).slice(0, 8);
+    const nodesById = new Map(data.nodes.map((node) => [node.id, node]));
+    return (buildAdjacency(data.edges).get(selectedNode.id) ?? [])
+      .map((nodeId) => nodesById.get(nodeId))
+      .filter((node): node is typeof data.nodes[number] => Boolean(node))
+      .slice(0, 8);
   }, [data.edges, data.nodes, selectedNode]);
 
   return (
@@ -204,3 +204,5 @@ export function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: 
     </aside>
   );
 }
+
+export const MemoizedSidebar = memo(Sidebar);

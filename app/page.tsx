@@ -7,8 +7,8 @@ import type { Community, CrawlProgress, CrawlResult, WikiEdge, WikiNode } from '
 import { createCrawlRequest, getCrawlPayload, parseCrawlParams, type CrawlRequest } from '@/lib/crawlRequest';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
-import { Sidebar } from './components/Sidebar';
-import { NodeDetailPanel } from './components/NodeDetailPanel';
+import { MemoizedSidebar } from './components/Sidebar';
+import { MemoizedNodeDetailPanel } from './components/NodeDetailPanel';
 
 // Dynamically import GraphCanvas to avoid SSR issues with WebGL/Sigma
 const GraphCanvas = dynamic(
@@ -50,39 +50,41 @@ function validateGraphData(data: Partial<CrawlResult> | null | undefined): strin
     issues.push('Graph is empty.');
   }
 
-  const nodeIds = data.nodes.map((node) => node?.id);
-  const duplicateNodeIds = new Set(nodeIds.filter((id, index) => id && nodeIds.indexOf(id) !== index));
-  if (duplicateNodeIds.size > 0) {
-    issues.push('Graph contains duplicate node IDs.');
+  const nodeIds = new Set<string>();
+  let hasDuplicateNodeIds = false;
+  for (const node of data.nodes) {
+    if (node?.id && nodeIds.has(node.id)) hasDuplicateNodeIds = true;
+    if (node?.id) nodeIds.add(node.id);
   }
+  if (hasDuplicateNodeIds) issues.push('Graph contains duplicate node IDs.');
 
-  const validNodeIds = new Set(nodeIds);
+  const validNodeIds = nodeIds;
   for (const edge of data.edges ?? []) {
     if (!validNodeIds.has(edge.source) || !validNodeIds.has(edge.target)) {
-      issues.push(`Edge references missing nodes: ${edge.source} -> ${edge.target}`);
+      if (issues.length < 10) issues.push(`Edge references missing nodes: ${edge.source} -> ${edge.target}`);
     }
   }
 
   for (const node of data.nodes) {
     if (!node || typeof node.id !== 'string' || !node.id.trim()) {
-      issues.push('A node has an invalid id.');
+      if (issues.length < 10) issues.push('A node has an invalid id.');
       continue;
     }
 
     if (!Number.isFinite(node.depth)) {
-      issues.push(`Node ${node.id} has an invalid depth.`);
+      if (issues.length < 10) issues.push(`Node ${node.id} has an invalid depth.`);
     }
 
     if (!Number.isFinite(node.pagerank)) {
-      issues.push(`Node ${node.id} has an invalid PageRank.`);
+      if (issues.length < 10) issues.push(`Node ${node.id} has an invalid PageRank.`);
     }
 
     if (!Number.isFinite(node.betweenness)) {
-      issues.push(`Node ${node.id} has an invalid betweenness value.`);
+      if (issues.length < 10) issues.push(`Node ${node.id} has an invalid betweenness value.`);
     }
 
     if (data.positions?.[node.id] && (!Number.isFinite(data.positions[node.id].x) || !Number.isFinite(data.positions[node.id].y))) {
-      issues.push(`Node ${node.id} has invalid saved coordinates.`);
+      if (issues.length < 10) issues.push(`Node ${node.id} has invalid saved coordinates.`);
     }
   }
 
@@ -91,7 +93,7 @@ function validateGraphData(data: Partial<CrawlResult> | null | undefined): strin
   ));
 
   if (invalidPositions.length > 0) {
-    issues.push('One or more saved node positions are invalid.');
+    if (issues.length < 10) issues.push('One or more saved node positions are invalid.');
   }
 
   return issues;
@@ -181,7 +183,7 @@ export default function Home() {
   const [maxNodes, setMaxNodes] = useState(150);
   const [submittedRequest, setSubmittedRequest] = useState<CrawlRequest | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>('community');
-  const [selectedNode, setSelectedNode] = useState<WikiNode | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
@@ -250,11 +252,19 @@ export default function Home() {
         const result = await readCrawlResponse(response, updateLoadingProgress, {
           onNodes: (nodes) => mergeLiveData(request, (current) => ({
             ...current,
-            nodes: Array.from(new Map([...current.nodes, ...nodes].filter((node) => node?.id).map((node) => [node.id, node])).values()),
+            nodes: (() => {
+              const merged = new Map(current.nodes.map((node) => [node.id, node]));
+              for (const node of nodes) if (node?.id) merged.set(node.id, node);
+              return [...merged.values()];
+            })(),
           })),
           onEdges: (edges) => mergeLiveData(request, (current) => ({
             ...current,
-            edges: Array.from(new Map([...current.edges, ...edges].filter((edge) => edge?.source && edge?.target).map((edge) => [`${edge.source}|${edge.target}`, edge])).values()),
+            edges: (() => {
+              const merged = new Map(current.edges.map((edge) => [`${edge.source}|${edge.target}`, edge]));
+              for (const edge of edges) if (edge?.source && edge?.target) merged.set(`${edge.source}|${edge.target}`, edge);
+              return [...merged.values()];
+            })(),
           })),
           onAnalysis: (metrics, communities) => mergeLiveData(request, (current) => ({
             ...current,
@@ -263,10 +273,13 @@ export default function Home() {
           })),
           onExtracts: (extracts) => mergeLiveData(request, (current) => ({
             ...current,
-            nodes: current.nodes.map((node) => {
-              const extract = extracts.find((item) => item.nodeId === node.id)?.extract;
-              return extract ? { ...node, extract } : node;
-            }),
+            nodes: (() => {
+              const extractByNodeId = new Map(extracts.map((item) => [item.nodeId, item.extract]));
+              return current.nodes.map((node) => {
+                const extract = extractByNodeId.get(node.id);
+                return extract ? { ...node, extract } : node;
+              });
+            })(),
           })),
           onWarning: (failedTitles) => setCrawlWarning(failedTitles.length),
         });
@@ -292,15 +305,15 @@ export default function Home() {
   });
 
   const displayData = data ?? liveData ?? previousDataRef.current;
+  const selectedNode = displayData?.nodes.find((node) => node.id === selectedNodeId) ?? null;
 
   useEffect(() => {
     if (!displayData) return;
 
-    const stillExists = displayData.nodes.some((node) => node.id === selectedNode?.id);
-    if (selectedNode && !stillExists) {
-      setSelectedNode(null);
+    if (selectedNodeId && !displayData.nodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(null);
     }
-  }, [displayData, selectedNode]);
+  }, [displayData, selectedNodeId]);
 
   useEffect(() => {
     if (!selectedNode || !selectedNode.title) return;
@@ -382,7 +395,7 @@ export default function Home() {
     setGraphError(null);
     setCrawlWarning(null);
     setNotFound(null);
-    setSelectedNode(null);
+    setSelectedNodeId(null);
     setFocusedNode(null);
     setExplorationHistory([]);
   }, [data, depth, liveData, maxNodes]);
@@ -409,7 +422,7 @@ export default function Home() {
 
   // Handle node click
   const handleNodeClick = useCallback((node: WikiNode) => {
-    setSelectedNode(node);
+    setSelectedNodeId(node.id);
     setFocusedNode(node.id);
     setGraphError(null);
     setCrawlWarning(null);
@@ -420,7 +433,7 @@ export default function Home() {
     setFocusedNode(nodeId);
     const node = displayData?.nodes.find(n => n.id === nodeId);
     if (node) {
-      setSelectedNode(node);
+      setSelectedNodeId(node.id);
     }
   }, [displayData]);
 
@@ -438,6 +451,11 @@ export default function Home() {
     setGraphError(null);
     expandMutation.mutate(nodeId);
   }, [expandMutation]);
+
+  const handleCloseSelection = useCallback(() => {
+    setSelectedNodeId(null);
+    setFocusedNode(null);
+  }, []);
 
   // Load from URL params
   useEffect(() => {
@@ -457,7 +475,7 @@ export default function Home() {
     const issues = validateGraphData(data);
     if (issues.length > 0) {
       setGraphError(issues[0]);
-      setSelectedNode(null);
+      setSelectedNodeId(null);
       setFocusedNode(null);
     }
   }, [data]);
@@ -641,7 +659,7 @@ export default function Home() {
                         onClick={() => {
                           const node = displayData.nodes.find((candidate) => candidate.id === step.id);
                           if (node) {
-                            setSelectedNode(node);
+                            setSelectedNodeId(node.id);
                             setFocusedNode(node.id);
                           }
                         }}
@@ -664,13 +682,10 @@ export default function Home() {
                 focusedNode={focusedNode}
               />
               
-              <NodeDetailPanel
+              <MemoizedNodeDetailPanel
                 node={selectedNode}
                 data={displayData}
-                onClose={() => {
-                  setSelectedNode(null);
-                  setFocusedNode(null);
-                }}
+                onClose={handleCloseSelection}
                 onExpand={handleExpand}
                 isExpanding={expandMutation.isPending}
               />
@@ -755,7 +770,7 @@ export default function Home() {
         </div>
 
         {/* Sidebar */}
-        {displayData && <Sidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} />}
+        {displayData && <MemoizedSidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} />}
       </div>
     </div>
   );

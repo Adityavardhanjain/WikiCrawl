@@ -1,6 +1,8 @@
 'use client';
 
+import { memo, useMemo } from 'react';
 import type { WikiNode, CrawlResult } from '@/types/graph';
+import { buildAdjacency } from '@/lib/adjacency';
 
 interface NodeDetailPanelProps {
   node: WikiNode | null;
@@ -10,20 +12,24 @@ interface NodeDetailPanelProps {
   isExpanding?: boolean;
 }
 
-export function NodeDetailPanel({
+function NodeDetailPanel({
   node,
   data,
   onClose,
   onExpand,
   isExpanding = false,
 }: NodeDetailPanelProps) {
+  const connectedNodes = useMemo(() => {
+    if (!node || !data) return [];
+    const nodesById = new Map(data.nodes.map((candidate) => [candidate.id, candidate]));
+    return (buildAdjacency(data.edges).get(node.id) ?? [])
+      .map((connectedId) => nodesById.get(connectedId))
+      .filter((connectedNode): connectedNode is WikiNode => Boolean(connectedNode));
+  }, [data?.edges, data?.nodes, node?.id]);
+
   if (!node || !data) return null;
 
   const community = data.communities.find(c => c.id === node.communityId);
-  const connectedNodes = data.nodes.filter((candidate) => data.edges.some((edge) => (
-    (edge.source === node.id && edge.target === candidate.id) ||
-    (edge.target === node.id && edge.source === candidate.id)
-  )));
 
   return (
     <div className="node-detail absolute right-4 top-4 w-80 glass-strong rounded-2xl shadow-2xl overflow-hidden border border-cyan-500/20 animate-in slide-in-from-right">
@@ -153,6 +159,8 @@ export function NodeDetailPanel({
     </div>
   );
 }
+
+export const MemoizedNodeDetailPanel = memo(NodeDetailPanel);
 
 function MetricCard({ label, value, color }: { label: string; value: string; color?: string }) {
   const colorClasses: Record<string, string> = {

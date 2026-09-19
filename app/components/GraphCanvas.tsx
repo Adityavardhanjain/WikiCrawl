@@ -29,9 +29,13 @@ export function GraphCanvas({
   const onNodeClickRef = useRef(onNodeClick);
   const dataRef = useRef(data);
   const [hoveredNode, setHoveredNode] = useState<WikiNode | null>(null);
-  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const tooltipPositionRef = useRef({ x: 0, y: 0 });
+  const tooltipFrameRef = useRef<number | null>(null);
   const focusedNodeRef = useRef(focusedNode);
   const hoveredNodeRef = useRef<string | null>(null);
+  const focusNeighborsRef = useRef(new Set<string>());
+  const hoverNeighborsRef = useRef(new Set<string>());
   const colorModeRef = useRef(colorMode);
   const topRankIdsRef = useRef(new Set<string>());
   const hubIdsRef = useRef(new Set<string>());
@@ -84,8 +88,11 @@ export function GraphCanvas({
   useEffect(() => {
     onNodeClickRef.current = onNodeClick;
     focusedNodeRef.current = focusedNode;
+    focusNeighborsRef.current = focusedNode && graphRef.current.hasNode(focusedNode)
+      ? new Set(graphRef.current.neighbors(focusedNode))
+      : new Set();
     sigmaRef.current?.refresh();
-  }, [focusedNode, onNodeClick]);
+  }, [focusedNode, onNodeClick, data]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -109,13 +116,11 @@ export function GraphCanvas({
       nodeReducer: (node, nodeAttributes) => {
         const focusId = focusedNodeRef.current;
         const hoverId = hoveredNodeRef.current;
-        const neighbors = focusId && graph.hasNode(focusId) ? new Set(graph.neighbors(focusId)) : null;
-        const hoverNeighbors = hoverId && graph.hasNode(hoverId) ? new Set(graph.neighbors(hoverId)) : null;
         const isRoot = node === dataRef.current.seedId;
         const isFocus = node === focusId;
-        const isNeighbor = neighbors?.has(node) ?? false;
+        const isNeighbor = focusNeighborsRef.current.has(node);
         const isHover = node === hoverId;
-        const isHoverNeighbor = hoverNeighbors?.has(node) ?? false;
+        const isHoverNeighbor = hoverNeighborsRef.current.has(node);
         const nodeData = graph.getNodeAttributes(node).raw as WikiNode;
         const isTopRanked = topRankIdsRef.current.has(node);
 
@@ -276,15 +281,19 @@ export function GraphCanvas({
     updateCommunityLabels();
 
     sigma.on('enterNode', ({ node }) => {
+      if (hoveredNodeRef.current === node) return;
       const nodeData = graph.getNodeAttributes(node).raw as WikiNode;
       hoveredNodeRef.current = node;
+      hoverNeighborsRef.current = graph.hasNode(node) ? new Set(graph.neighbors(node)) : new Set();
       setHoveredNode(nodeData);
       sigma.refresh();
       sigma.getContainer().style.cursor = 'pointer';
     });
 
     sigma.on('leaveNode', () => {
+      if (hoveredNodeRef.current === null) return;
       hoveredNodeRef.current = null;
+      hoverNeighborsRef.current = new Set();
       setHoveredNode(null);
       sigma.refresh();
       sigma.getContainer().style.cursor = 'default';
@@ -298,15 +307,24 @@ export function GraphCanvas({
     const container = sigma.getContainer();
     const handleMouseMove = (event: MouseEvent) => {
       const rect = container.getBoundingClientRect();
-      setTooltipPos({
+      tooltipPositionRef.current = {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
+      };
+      if (tooltipFrameRef.current !== null) return;
+      tooltipFrameRef.current = window.requestAnimationFrame(() => {
+        tooltipFrameRef.current = null;
+        const { x, y } = tooltipPositionRef.current;
+        if (tooltipRef.current) {
+          tooltipRef.current.style.transform = `translate3d(${x + 15}px, ${y + 15}px, 0)`;
+        }
       });
     };
     container.addEventListener('mousemove', handleMouseMove);
 
     return () => {
       container.removeEventListener('mousemove', handleMouseMove);
+      if (tooltipFrameRef.current !== null) window.cancelAnimationFrame(tooltipFrameRef.current);
       sigma.getCamera().removeListener('updated', updateCommunityLabels);
       graph.removeListener('eachNodeAttributesUpdated', updateCommunityLabels);
       if (communityFrameRef.current !== null) window.cancelAnimationFrame(communityFrameRef.current);
@@ -318,6 +336,7 @@ export function GraphCanvas({
   useEffect(() => {
     const graph = graphRef.current;
     hoveredNodeRef.current = null;
+    hoverNeighborsRef.current = new Set();
     setHoveredNode(null);
 
     const wasEmpty = graph.order === 0;
@@ -330,6 +349,10 @@ export function GraphCanvas({
       sizeForNode: (node) => getNodeSize(node.pagerank, 5, 18, rankValues),
       colorForNode: (node) => getNodeColor(node, data.seedId, colorModeRef.current, data.communities.length, maxDepth),
     });
+    focusedNodeRef.current = focusedNode;
+    focusNeighborsRef.current = focusedNode && graph.hasNode(focusedNode)
+      ? new Set(graph.neighbors(focusedNode))
+      : new Set();
     const shapeChanged = previousShapeRef.current.seedId !== data.seedId
       || previousShapeRef.current.nodes !== data.nodes.length
       || previousShapeRef.current.edges !== edgeCount;
@@ -344,7 +367,7 @@ export function GraphCanvas({
     if (result.shouldFitCamera) {
       sigmaRef.current?.getCamera().animatedReset({ duration: 420 });
     }
-  }, [data, edgeCount, maxDepth, rankValues]);
+  }, [data, edgeCount, focusedNode, maxDepth, rankValues]);
 
   const { arranging, paused, togglePause } = useForceLayout(graphRef.current, {
     seedId: data.seedId,
@@ -513,10 +536,10 @@ export function GraphCanvas({
 
       {hoveredNode && (
         <div
+          ref={tooltipRef}
           className="node-tooltip"
           style={{
-            left: tooltipPos.x + 15,
-            top: tooltipPos.y + 15,
+            transform: `translate3d(${tooltipPositionRef.current.x + 15}px, ${tooltipPositionRef.current.y + 15}px, 0)`,
           }}
         >
           <h4>{hoveredNode.title}</h4>

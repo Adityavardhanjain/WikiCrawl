@@ -3,8 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Graph from 'graphology';
 import { Sigma } from 'sigma';
+import { EdgeArrowProgram, EdgeLineProgram } from 'sigma/rendering';
 import type { CrawlResult, WikiNode } from '@/types/graph';
 import { getCommunityColor, getNodeSize } from '@/lib/graphAnalysis';
+import { syncGraphData, updateGraphColors } from '@/lib/graphSync';
+import { seedInitialPositions } from '@/lib/layoutSeed';
+import { getRememberedPositions, useForceLayout } from './useForceLayout';
 
 interface GraphCanvasProps {
   data: CrawlResult;
@@ -28,13 +32,54 @@ export function GraphCanvas({
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const focusedNodeRef = useRef(focusedNode);
   const hoveredNodeRef = useRef<string | null>(null);
+  const colorModeRef = useRef(colorMode);
+  const topRankIdsRef = useRef(new Set<string>());
+  const hubIdsRef = useRef(new Set<string>());
+  const showAllEdgesRef = useRef(false);
+  const showArrowsRef = useRef(false);
+  const communityFrameRef = useRef<number | null>(null);
+  const updateCommunityLabelsRef = useRef<() => void>(() => undefined);
+  const pendingNewNodeIdsRef = useRef<string[]>([]);
+  const previousShapeRef = useRef({ seedId: '', nodes: 0, edges: 0 });
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  const [showAllEdges, setShowAllEdges] = useState(false);
+  const [showArrows, setShowArrows] = useState(false);
+  const [communityLabels, setCommunityLabels] = useState<Array<{
+    id: number;
+    label: string;
+    size: number;
+    color: string;
+    x: number;
+    y: number;
+  }>>([]);
 
   dataRef.current = data;
+  colorModeRef.current = colorMode;
 
   const maxDepth = useMemo(() => {
     const depths = data.nodes.map((n) => n.depth).filter((d) => d >= 0);
     return Math.max(...depths, 1);
   }, [data.nodes]);
+
+  const rankValues = useMemo(() => data.nodes.map((node) => node.pagerank), [data.nodes]);
+  const topRankIds = useMemo(() => new Set(
+    [...data.nodes]
+      .sort((left, right) => right.pagerank - left.pagerank)
+      .slice(0, 30)
+      .map((node) => node.id),
+  ), [data.nodes]);
+  const hubIds = useMemo(() => new Set(
+    [...data.nodes]
+      .sort((left, right) => (right.inDegree + right.outDegree) - (left.inDegree + left.outDegree))
+      .slice(0, 100)
+      .map((node) => node.id),
+  ), [data.nodes]);
+  const edgeCount = data.edges.length;
+  const denseEdges = edgeCount > 5000;
+  topRankIdsRef.current = topRankIds;
+  hubIdsRef.current = hubIds;
+  showAllEdgesRef.current = showAllEdges;
+  showArrowsRef.current = showArrows;
 
   useEffect(() => {
     onNodeClickRef.current = onNodeClick;
@@ -52,13 +97,15 @@ export function GraphCanvas({
       labelSize: 12,
       labelColor: { color: '#e2e8f0' },
       labelWeight: '600',
+      labelDensity: 0.08,
+      labelGridCellSize: 90,
       defaultEdgeColor: 'rgba(148, 163, 184, 0.2)',
       defaultNodeColor: '#67e8f9',
       minCameraRatio: 0.22,
       maxCameraRatio: 4,
       hideLabelsOnMove: true,
-      hideEdgesOnMove: false,
-      labelRenderedSizeThreshold: 12,
+      hideEdgesOnMove: dataRef.current.edges.length > 5000,
+      labelRenderedSizeThreshold: 6,
       nodeReducer: (node, nodeAttributes) => {
         const focusId = focusedNodeRef.current;
         const hoverId = hoveredNodeRef.current;
@@ -70,6 +117,7 @@ export function GraphCanvas({
         const isHover = node === hoverId;
         const isHoverNeighbor = hoverNeighbors?.has(node) ?? false;
         const nodeData = graph.getNodeAttributes(node).raw as WikiNode;
+        const isTopRanked = topRankIdsRef.current.has(node);
 
         if (isRoot) {
           return {
@@ -109,7 +157,7 @@ export function GraphCanvas({
             ...nodeAttributes,
             size: (Number(nodeAttributes.size) || 8) + 1.5,
             color: '#72c9c0',
-            label: '',
+            label: nodeData.title,
             forceLabel: false,
             zIndex: 5,
           };
@@ -130,15 +178,15 @@ export function GraphCanvas({
           return {
             ...nodeAttributes,
             color: '#9adbd3',
-            label: '',
+            label: nodeData.title,
             forceLabel: false,
           };
         }
 
         return {
           ...nodeAttributes,
-          label: '',
-          forceLabel: false,
+          label: nodeData.title,
+          forceLabel: isTopRanked,
         };
       },
       edgeReducer: (edge, edgeAttributes) => {
@@ -147,24 +195,85 @@ export function GraphCanvas({
         const [source, target] = graph.extremities(edge);
         const isFocusedEdge = focusId === source || focusId === target;
         const isHoveredEdge = hoverId === source || hoverId === target;
+        if (
+          dataRef.current.edges.length > 5000 &&
+          !showAllEdgesRef.current &&
+          !isFocusedEdge &&
+          !isHoveredEdge &&
+          !hubIdsRef.current.has(source) &&
+          !hubIdsRef.current.has(target)
+        ) {
+          return { ...edgeAttributes, hidden: true };
+        }
+
+        const sourceData = graph.getNodeAttributes(source).raw as WikiNode;
+        const targetData = graph.getNodeAttributes(target).raw as WikiNode;
+        const maximumDegree = Math.max(
+          1,
+          ...dataRef.current.nodes.map((node) => node.inDegree + node.outDegree),
+        );
+        const edgeAlpha = 0.06 + 0.22 * Math.sqrt(
+          Math.max(sourceData.inDegree + sourceData.outDegree, targetData.inDegree + targetData.outDegree) / maximumDegree,
+        );
 
         if (isFocusedEdge) {
-          return { ...edgeAttributes, color: 'rgba(125, 211, 252, 0.8)', size: 1.6 };
+          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(125, 211, 252, 0.8)', size: 1.6 };
         }
 
         if (isHoveredEdge) {
-          return { ...edgeAttributes, color: 'rgba(125, 211, 252, 0.45)', size: 1.1 };
+          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(125, 211, 252, 0.45)', size: 1.1 };
         }
 
         if (focusId) {
-          return { ...edgeAttributes, color: 'rgba(148, 163, 184, 0.08)', size: 0.45 };
+          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: `rgba(148, 163, 184, ${edgeAlpha * 0.4})`, size: 0.45 };
         }
 
-        return { ...edgeAttributes, color: 'rgba(148, 163, 184, 0.22)', size: 0.8 };
+        return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: `rgba(148, 163, 184, ${edgeAlpha})`, size: 0.8 };
+      },
+      edgeProgramClasses: {
+        line: EdgeLineProgram,
+        arrow: EdgeArrowProgram,
       },
     });
 
     sigmaRef.current = sigma;
+
+    const updateCommunityLabels = () => {
+      if (communityFrameRef.current !== null) return;
+      communityFrameRef.current = window.requestAnimationFrame(() => {
+        communityFrameRef.current = null;
+        if (sigma.getCamera().getState().ratio < 0.45) {
+          setCommunityLabels([]);
+          return;
+        }
+
+        const nextLabels = dataRef.current.communities.slice(0, 8).flatMap((community) => {
+          const members = dataRef.current.nodes.filter((node) => node.communityId === community.id && graph.hasNode(node.id));
+          if (members.length === 0) return [];
+          const centroid = members.reduce((sum, node) => {
+            const position = graph.getNodeAttributes(node.id);
+            return { x: sum.x + Number(position.x), y: sum.y + Number(position.y) };
+          }, { x: 0, y: 0 });
+          const viewport = sigma.graphToViewport({
+            x: centroid.x / members.length,
+            y: centroid.y / members.length,
+          });
+          return [{
+            id: community.id,
+            label: community.label,
+            size: community.size,
+            color: getCommunityColor(community.id, Math.max(dataRef.current.communities.length, 1)),
+            x: viewport.x,
+            y: viewport.y,
+          }];
+        });
+        setCommunityLabels(nextLabels);
+      });
+    };
+    updateCommunityLabelsRef.current = updateCommunityLabels;
+    sigma.getCamera().on('updated', updateCommunityLabels);
+    graph.on('eachNodeAttributesUpdated', updateCommunityLabels);
+    updateCommunityLabels();
 
     sigma.on('enterNode', ({ node }) => {
       const nodeData = graph.getNodeAttributes(node).raw as WikiNode;
@@ -198,6 +307,9 @@ export function GraphCanvas({
 
     return () => {
       container.removeEventListener('mousemove', handleMouseMove);
+      sigma.getCamera().removeListener('updated', updateCommunityLabels);
+      graph.removeListener('eachNodeAttributesUpdated', updateCommunityLabels);
+      if (communityFrameRef.current !== null) window.cancelAnimationFrame(communityFrameRef.current);
       sigma.kill();
       sigmaRef.current = null;
     };
@@ -205,42 +317,62 @@ export function GraphCanvas({
 
   useEffect(() => {
     const graph = graphRef.current;
-    graph.clear();
     hoveredNodeRef.current = null;
     setHoveredNode(null);
 
-    const positions = getKnowledgeMapPositions(data.nodes, data.edges, data.seedId);
-    for (const node of data.nodes) {
-      const graphPosition = positions.get(node.id) ?? { x: 0, y: 0 };
-      const isSeed = node.id === data.seedId;
-      const size = getNodeSize(node.pagerank, 5, 16) * (isSeed ? 1.3 : 1);
-      const color = isSeed ? '#f08a70' : colorMode === 'community'
-        ? getCommunityColor(node.communityId, Math.max(data.communities.length, 1))
-        : getDepthColor(node.depth, maxDepth);
-
-      graph.addNode(node.id, {
-        x: graphPosition.x,
-        y: graphPosition.y,
-        size,
-        color,
-        label: isSeed ? node.title : '',
-        raw: node,
-        isSeed,
-      });
+    const wasEmpty = graph.order === 0;
+    const seedChanged = graph.order > 0 && graph.getAttribute('seedId') !== data.seedId;
+    const positions = wasEmpty || seedChanged
+      ? getRememberedPositions(data.seedId) ?? seedInitialPositions(data.nodes, data.seedId)
+      : undefined;
+    const result = syncGraphData(graph, data, {
+      initialPositions: positions,
+      sizeForNode: (node) => getNodeSize(node.pagerank, 5, 18, rankValues),
+      colorForNode: (node) => getNodeColor(node, data.seedId, colorModeRef.current, data.communities.length, maxDepth),
+    });
+    const shapeChanged = previousShapeRef.current.seedId !== data.seedId
+      || previousShapeRef.current.nodes !== data.nodes.length
+      || previousShapeRef.current.edges !== edgeCount;
+    if (shapeChanged || result.addedNodeIds.length > 0 || result.seedChanged) {
+      pendingNewNodeIdsRef.current = result.seedChanged ? data.nodes.map((node) => node.id) : result.addedNodeIds;
+      setLayoutRevision((revision) => revision + 1);
     }
-
-    for (const edge of data.edges) {
-      if (graph.hasNode(edge.source) && graph.hasNode(edge.target) && !graph.hasEdge(edge.source, edge.target)) {
-        graph.addEdge(edge.source, edge.target, {
-          size: 0.8,
-          color: 'rgba(148, 163, 184, 0.22)',
-        });
-      }
-    }
+    previousShapeRef.current = { seedId: data.seedId, nodes: data.nodes.length, edges: edgeCount };
 
     sigmaRef.current?.refresh();
-    sigmaRef.current?.getCamera().animatedReset({ duration: 420 });
+    updateCommunityLabelsRef.current();
+    if (result.shouldFitCamera) {
+      sigmaRef.current?.getCamera().animatedReset({ duration: 420 });
+    }
+  }, [data, edgeCount, maxDepth, rankValues]);
+
+  const { arranging, paused, togglePause } = useForceLayout(graphRef.current, {
+    seedId: data.seedId,
+    changeKey: `${data.seedId}:${data.nodes.length}:${data.edges.length}:${layoutRevision}`,
+    newNodeIds: pendingNewNodeIdsRef.current,
+  });
+
+  useEffect(() => {
+    updateGraphColors(
+      graphRef.current,
+      data,
+      (node) => getNodeColor(node, data.seedId, colorMode, data.communities.length, maxDepth),
+    );
+    sigmaRef.current?.refresh();
   }, [colorMode, data, maxDepth]);
+
+  useEffect(() => {
+    if (!denseEdges && showAllEdges) setShowAllEdges(false);
+    sigmaRef.current?.setSetting('hideEdgesOnMove', denseEdges);
+    sigmaRef.current?.refresh();
+  }, [denseEdges, showAllEdges]);
+
+  useEffect(() => {
+    graphRef.current.forEachEdge((edge) => {
+      graphRef.current.setEdgeAttribute(edge, 'type', showArrows ? 'arrow' : 'line');
+    });
+    sigmaRef.current?.refresh();
+  }, [showArrows]);
 
   useEffect(() => {
     if (!sigmaRef.current || !focusedNode) return;
@@ -257,19 +389,21 @@ export function GraphCanvas({
 
   useEffect(() => {
     sigmaRef.current?.refresh();
-  }, [focusedNode, colorMode]);
+  }, [focusedNode]);
 
   const resetLayout = () => {
     const graph = graphRef.current;
-    const positions = getKnowledgeMapPositions(data.nodes, data.edges, data.seedId);
+    const positions = seedInitialPositions(data.nodes, data.seedId);
 
     for (const node of data.nodes) {
       const pos = positions.get(node.id) ?? { x: 0, y: 0 };
       graph.setNodeAttribute(node.id, 'x', pos.x);
       graph.setNodeAttribute(node.id, 'y', pos.y);
+      graph.setNodeAttribute(node.id, 'fixed', false);
     }
 
-    sigmaRef.current?.getCamera().animatedReset({ duration: 260 });
+    pendingNewNodeIdsRef.current = data.nodes.map((node) => node.id);
+    setLayoutRevision((revision) => revision + 1);
     sigmaRef.current?.refresh();
   };
 
@@ -280,9 +414,26 @@ export function GraphCanvas({
         <button className="graph-control" onClick={() => sigmaRef.current?.getCamera().animatedUnzoom({ duration: 180 })} aria-label="Zoom out">-</button>
         <button className="graph-control graph-control-wide" onClick={() => sigmaRef.current?.getCamera().animatedReset({ duration: 220 })}>Fit</button>
         <button className="graph-control graph-control-wide" onClick={resetLayout}>Reset</button>
+        {denseEdges && (
+          <button className="graph-control graph-control-wide" onClick={() => setShowAllEdges((visible) => !visible)}>
+            {showAllEdges ? 'Hubs' : 'All edges'}
+          </button>
+        )}
+        <button className="graph-control graph-control-wide" onClick={() => setShowArrows((visible) => !visible)}>
+          {showArrows ? 'Arrows on' : 'Arrows'}
+        </button>
       </div>
 
-      <div className="absolute top-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10">
+      {(arranging || paused) && (
+        <div className="absolute top-16 right-4 graph-overlay rounded-lg px-3 py-2 text-xs text-cyan-200 z-10">
+          <span>{paused ? 'Paused' : 'Arranging...'}</span>
+          <button className="ml-3 text-white underline" onClick={togglePause}>
+            {paused ? 'Resume' : 'Pause'}
+          </button>
+        </div>
+      )}
+
+      <div className="absolute top-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-w-xs">
         <div className="text-white font-semibold mb-3 flex items-center gap-2">
           <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -293,15 +444,49 @@ export function GraphCanvas({
           <div className="w-3 h-3 rounded-full bg-[#f08a70] border border-[#ffd1c2]/70" />
           <span className="text-slate-300">Root</span>
         </div>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-3 h-3 rounded-full bg-[#72c9c0] border border-[#c7f1eb]/50" />
-          <span className="text-slate-300">Connected</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-slate-500 border border-slate-300/50" />
+        {colorMode === 'community' ? (
+          <div className="space-y-1.5">
+            {data.communities.slice(0, 8).map((community) => {
+              const topNode = data.nodes.find((node) => node.id === community.topPages[0]);
+              return (
+                <button
+                  key={community.id}
+                  type="button"
+                  className="flex w-full items-center gap-2 text-left text-slate-300 hover:text-white"
+                  onClick={() => topNode && onNodeClick(topNode)}
+                >
+                  <span
+                    className="h-3 w-3 flex-shrink-0 rounded-full"
+                    style={{ backgroundColor: getCommunityColor(community.id, Math.max(data.communities.length, 1)) }}
+                  />
+                  <span className="truncate">{community.label}</span>
+                  <span className="ml-auto text-slate-500">{community.size}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="h-2 w-40 rounded-full bg-gradient-to-r from-red-400 via-yellow-300 to-emerald-400" />
+            <div className="flex w-40 justify-between text-slate-500"><span>3 hops</span><span>1 hop</span></div>
+          </div>
+        )}
+        <div className="mt-3 flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-[#f4f1ea] border border-white/70" />
           <span className="text-slate-300">Focus</span>
         </div>
       </div>
+
+      {communityLabels.map((community) => (
+        <div
+          key={community.id}
+          className="pointer-events-none absolute z-[5] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-slate-950/65 px-2 py-1 text-[10px] text-slate-200 shadow-lg backdrop-blur-sm"
+          style={{ left: community.x, top: community.y }}
+        >
+          <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: community.color }} />
+          {community.label} <span className="text-slate-500">({community.size})</span>
+        </div>
+      ))}
 
       <div className="absolute bottom-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-sm:hidden">
         <div className="text-white font-semibold mb-3 flex items-center gap-2">
@@ -350,57 +535,22 @@ export function GraphCanvas({
   );
 }
 
-function getKnowledgeMapPositions(
-  nodes: WikiNode[],
-  edges: CrawlResult['edges'],
-  seedId: string,
-): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>();
-  const seed = nodes.find((node) => node.id === seedId) ?? nodes[0];
-
-  if (!seed) return positions;
-
-  const neighbors = new Map<string, Set<string>>();
-  for (const node of nodes) neighbors.set(node.id, new Set());
-  for (const edge of edges) {
-    neighbors.get(edge.source)?.add(edge.target);
-    neighbors.get(edge.target)?.add(edge.source);
-  }
-
-  positions.set(seed.id, { x: 0, y: 0 });
-  const placed = new Set([seed.id]);
-  const byDepth = [...nodes]
-    .filter((node) => node.id !== seed.id)
-    .sort((a, b) => (a.depth - b.depth) || (b.pagerank - a.pagerank) || a.title.localeCompare(b.title));
-  const placedByDepth = new Map<number, number>();
-
-  byDepth.forEach((node, index) => {
-    const depth = node.depth >= 0 ? node.depth : 2;
-    const siblingIndex = placedByDepth.get(depth) ?? 0;
-    placedByDepth.set(depth, siblingIndex + 1);
-    const connected = Array.from(neighbors.get(node.id) ?? []).filter((id) => placed.has(id));
-    const anchor = connected.length > 0
-      ? connected.map((id) => positions.get(id)).find(Boolean) ?? { x: 0, y: 0 }
-      : { x: 0, y: 0 };
-    const importance = Math.min(Math.max(node.pagerank * 1000, 0), 1);
-    const branch = siblingIndex % 2 === 0 ? 1 : -1;
-    const lane = Math.floor(siblingIndex / 2);
-    const spread = 170 + lane * 135 + importance * 38;
-    const angle = branch * (0.42 + (lane % 3) * 0.23) + depth * 0.17 + index * 0.035;
-
-    positions.set(node.id, {
-      x: anchor.x + Math.cos(angle) * spread,
-      y: anchor.y + Math.sin(angle) * spread,
-    });
-    placed.add(node.id);
-  });
-
-  return positions;
-}
-
 function getDepthColor(depth: number, maxDepth: number): string {
   if (depth < 0) return '#94a3b8';
   const ratio = depth / Math.max(maxDepth, 1);
   const hue = 178 - ratio * 22;
   return `hsl(${hue}, 52%, 58%)`;
+}
+
+function getNodeColor(
+  node: WikiNode,
+  seedId: string,
+  colorMode: 'community' | 'depth',
+  communityCount: number,
+  maxDepth: number,
+): string {
+  if (node.id === seedId) return '#f08a70';
+  return colorMode === 'community'
+    ? getCommunityColor(node.communityId, Math.max(communityCount, 1))
+    : getDepthColor(node.depth, maxDepth);
 }

@@ -137,8 +137,16 @@ export function getNodeColor(
   }
 }
 
-export function getNodeSize(pagerank: number, minSize: number = 5, maxSize: number = 30): number {
-  // Scale by PageRank - logarithmic scale for better visualization
-  const scaled = Math.log1p(pagerank * 1000) * 8;
-  return Math.max(minSize, Math.min(maxSize, scaled));
+export function getNodeSize(
+  pagerank: number,
+  minSize: number = 5,
+  maxSize: number = 18,
+  rankValues: number[] = [pagerank],
+): number {
+  const sortedRanks = [...rankValues].filter(Number.isFinite).sort((left, right) => left - right);
+  if (sortedRanks.length <= 1) return minSize;
+
+  const lowerRankCount = sortedRanks.filter((rank) => rank < pagerank).length;
+  const percentile = lowerRankCount / (sortedRanks.length - 1);
+  return minSize + Math.sqrt(percentile) * (maxSize - minSize);
 }

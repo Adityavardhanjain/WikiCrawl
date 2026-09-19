@@ -103,7 +103,7 @@ async function readCrawlResponse(
   handlers?: {
     onNodes?: (nodes: WikiNode[]) => void;
     onEdges?: (edges: WikiEdge[]) => void;
-    onAnalysis?: (nodes: WikiNode[], communities: Community[]) => void;
+    onAnalysis?: (metrics: Record<string, Partial<WikiNode>>, communities: Community[]) => void;
     onExtracts?: (extracts: { nodeId: string; extract: string | null }[]) => void;
     onWarning?: (failedTitles: string[]) => void;
   }
@@ -149,7 +149,7 @@ async function readCrawlResponse(
       }
       if (event === 'nodes') handlers?.onNodes?.(payload.nodes ?? []);
       if (event === 'edges') handlers?.onEdges?.(payload.edges ?? []);
-      if (event === 'analysis') handlers?.onAnalysis?.(payload.nodes ?? [], payload.communities ?? []);
+      if (event === 'analysis') handlers?.onAnalysis?.(payload.metrics ?? {}, payload.communities ?? []);
       if (event === 'extracts') handlers?.onExtracts?.(payload.extracts ?? []);
       if (event === 'warning') handlers?.onWarning?.(payload.failedTitles ?? []);
       if (payload?.result) {
@@ -177,8 +177,8 @@ export default function Home() {
   const queryClient = useQueryClient();
   
   // State
-  const [depth, setDepth] = useState(3);
-  const [maxNodes, setMaxNodes] = useState(500);
+  const [depth, setDepth] = useState(2);
+  const [maxNodes, setMaxNodes] = useState(150);
   const [submittedRequest, setSubmittedRequest] = useState<CrawlRequest | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>('community');
   const [selectedNode, setSelectedNode] = useState<WikiNode | null>(null);
@@ -256,9 +256,9 @@ export default function Home() {
             ...current,
             edges: Array.from(new Map([...current.edges, ...edges].filter((edge) => edge?.source && edge?.target).map((edge) => [`${edge.source}|${edge.target}`, edge])).values()),
           })),
-          onAnalysis: (nodes, communities) => mergeLiveData(request, (current) => ({
+          onAnalysis: (metrics, communities) => mergeLiveData(request, (current) => ({
             ...current,
-            nodes: Array.from(new Map([...current.nodes, ...nodes].filter((node) => node?.id).map((node) => [node.id, node])).values()),
+            nodes: current.nodes.map((node) => ({ ...node, ...(metrics[node.id] ?? {}) })),
             communities,
           })),
           onExtracts: (extracts) => mergeLiveData(request, (current) => ({
@@ -386,6 +386,26 @@ export default function Home() {
     setFocusedNode(null);
     setExplorationHistory([]);
   }, [data, depth, liveData, maxNodes]);
+
+  const handleGoDeeper = useCallback(() => {
+    if (!submittedRequest || submittedRequest.depth >= 3) return;
+    const nextDepth = Math.min(3, submittedRequest.depth + 1);
+    const nextMaxNodes = Math.min(500, submittedRequest.maxNodes * 2);
+    previousDataRef.current = data ?? liveData;
+    setDepth(nextDepth);
+    setMaxNodes(nextMaxNodes);
+    const request = createCrawlRequest(submittedRequest.seed, nextDepth, nextMaxNodes, ++requestNonceRef.current);
+    const url = new URL(window.location.href);
+    url.searchParams.set('depth', String(nextDepth));
+    url.searchParams.set('nodes', String(nextMaxNodes));
+    window.history.replaceState({}, '', url.toString());
+    submittedRequestRef.current = request;
+    setSubmittedRequest(request);
+    setLiveData(null);
+    setLoadingProgress(0);
+    setGraphError(null);
+    setCrawlWarning(null);
+  }, [data, liveData, submittedRequest]);
 
   // Handle node click
   const handleNodeClick = useCallback((node: WikiNode) => {
@@ -522,6 +542,8 @@ export default function Home() {
                 maxNodes={maxNodes}
                 onDepthChange={setDepth}
                 onMaxNodesChange={setMaxNodes}
+                onGoDeeper={handleGoDeeper}
+                canGoDeeper={Boolean(submittedRequest && submittedRequest.depth < 3)}
                 disabled={isLoading}
               />
             </div>

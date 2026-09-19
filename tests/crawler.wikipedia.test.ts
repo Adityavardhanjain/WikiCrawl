@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { installMockMediaWiki } from './helpers/mockMediaWiki';
 
+const pageCache = vi.hoisted(() => new Map<string, { title: string; resolvedTitle: string; links: string[]; complete: boolean }>());
+
 vi.mock('../lib/db', () => ({
-  getCachedPageLinks: vi.fn(() => null),
-  setCachedPageLinks: vi.fn(),
+  getCachedPageLinks: vi.fn((title: string) => pageCache.get(title.toLowerCase()) ?? null),
+  setCachedPageLinks: vi.fn((page: { title: string; resolvedTitle: string; links: string[]; complete: boolean }) => {
+    pageCache.set(page.title.toLowerCase(), page);
+  }),
 }));
 
 import { crawlWikipedia } from '../lib/crawler';
@@ -13,6 +17,7 @@ import { setCachedPageLinks } from '../lib/db';
 describe('offline crawler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pageCache.clear();
   });
 
   it('crawls a small graph with bounded nodes, unique edges, and depth metadata', async () => {
@@ -82,6 +87,34 @@ describe('offline crawler', () => {
       expect(secondPage.continueToken).toBeUndefined();
       expect(mock.stats.requests).toBe(2);
       expect(mock.stats.linkRowsDownloaded).toBe(650);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('does not paginate satisfied pages in a mixed batch', async () => {
+    const mock = installMockMediaWiki();
+
+    try {
+      const firstPage = await getPageLinksBatch(['Page 0', 'Page 1']);
+      expect(firstPage.pages.find((page) => page.title === 'Page 1')?.complete).toBe(true);
+      expect(firstPage.continueToken).toBe('500');
+      const secondPage = await getPageLinksBatch(['Page 0'], firstPage.continueToken);
+      expect(secondPage.pages).toHaveLength(1);
+      expect(mock.stats.requests).toBe(2);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('uses completed page-link cache on an identical crawl', async () => {
+    const mock = installMockMediaWiki();
+
+    try {
+      await crawlWikipedia({ seedTitle: 'Page 0', depth: 1, maxNodes: 3 });
+      const firstRequestCount = mock.stats.requests;
+      await crawlWikipedia({ seedTitle: 'Page 0', depth: 1, maxNodes: 3 });
+      expect(mock.stats.requests - firstRequestCount).toBe(0);
     } finally {
       mock.restore();
     }

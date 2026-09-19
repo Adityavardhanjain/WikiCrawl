@@ -14,12 +14,12 @@ describe('crawl requests', () => {
   it('clamps invalid URL values to server bounds', () => {
     expect(parseCrawlParams('?seed=A&depth=wat&nodes=9999')).toEqual({
       seed: 'A',
-      depth: 3,
+        depth: 2,
       maxNodes: 500,
     });
   });
 
   it('uses defaults for missing URL values', () => {
-    expect(parseCrawlParams('?seed=A')).toEqual({ seed: 'A', depth: 3, maxNodes: 500 });
+      expect(parseCrawlParams('?seed=A')).toEqual({ seed: 'A', depth: 2, maxNodes: 150 });
   });
 });

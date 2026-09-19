@@ -5,6 +5,8 @@ interface CrawlControlsProps {
   maxNodes: number;
   onDepthChange: (depth: number) => void;
   onMaxNodesChange: (maxNodes: number) => void;
+  onGoDeeper?: () => void;
+  canGoDeeper?: boolean;
   disabled?: boolean;
 }
 
@@ -13,10 +15,12 @@ export function CrawlControls({
   maxNodes,
   onDepthChange,
   onMaxNodesChange,
+  onGoDeeper,
+  canGoDeeper = false,
   disabled = false,
 }: CrawlControlsProps) {
   return (
-    <div className="flex gap-6">
+    <div className="flex items-end gap-6">
       <div className="flex-1">
         <div className="flex justify-between items-center mb-2">
           <label className="text-sm font-medium text-gray-300">
@@ -64,6 +68,17 @@ export function CrawlControls({
           <span>500</span>
         </div>
       </div>
+
+      {onGoDeeper && (
+        <button
+          type="button"
+          onClick={onGoDeeper}
+          disabled={disabled || !canGoDeeper}
+          className="h-10 whitespace-nowrap rounded-lg border border-cyan-400/40 px-3 text-sm font-medium text-cyan-200 transition hover:bg-cyan-400/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Go deeper
+        </button>
+      )}
     </div>
   );
 }

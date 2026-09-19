@@ -4,6 +4,7 @@ import { isJunkTitle } from './filters';
 import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
 
 const WIKIPEDIA_BATCH_SIZE = 8;
+const MAX_CRAWL_CONCURRENCY = 6;
 const PAGE_LINK_LIMIT: number | undefined = undefined;
 const MAX_REQUEST_BUDGET = 500;
 
@@ -88,6 +89,8 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   let progressTarget = 1;
   let activeWork = 0;
   let requestsUsed = 0;
+  const configuredConcurrency = Number(process.env.CRAWL_CONCURRENCY ?? 4);
+  const crawlConcurrency = Math.min(MAX_CRAWL_CONCURRENCY, Math.max(1, Math.trunc(configuredConcurrency) || 4));
 
   const emitProgress = (complete = false) => {
     const done = progress.nodes.length;
@@ -98,19 +101,15 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     onProgress?.({ done, target: Math.max(progressTarget, done) });
   };
 
-  while (progress.queue.length > 0 && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
-    const batchSize = Math.min(WIKIPEDIA_BATCH_SIZE, progress.queue.length, requestBudget - requestsUsed);
-    const batch = progress.queue.splice(0, batchSize);
-    if (batch.length === 0) break;
-    activeWork = batch.length;
+  const processBatch = async (batch: { title: string; depth: number }[]) => {
 
     const batchTitles = batch.map(({ title }) => title);
-    const fetchBatch = async (continueToken?: string) => {
+    const fetchBatch = async (titles: string[], continueToken?: string) => {
+      if (requestsUsed >= requestBudget) return null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          const response = await getPageLinksBatch(batchTitles, continueToken);
           requestsUsed += 1;
-          return response;
+          return await getPageLinksBatch(titles, continueToken);
         } catch {
           if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 50));
         }
@@ -119,10 +118,9 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
       return null;
     };
 
-    const batchResponse = await fetchBatch();
+    const batchResponse = await fetchBatch(batchTitles);
     if (!batchResponse) {
-      activeWork = 0;
-      continue;
+      return;
     }
 
     const batchNodeIds = new Set(progress.nodes.map((node) => node.id));
@@ -145,7 +143,8 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
       return { title, currentDepth, result, canonicalTitle };
     });
 
-    const collectedLinks = new Map<string, number>();
+    const collectedLinks = new Map<string, string[]>();
+    const satisfiedTitles = new Set<string>();
     const batchCanonicalTitles = new Set<string>();
 
     for (const item of batchResults) {
@@ -160,12 +159,20 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
         continue;
       }
 
+      if (progress.nodes.length >= maxNodes) {
+        activeWork -= 1;
+        continue;
+      }
+
       batchCanonicalTitles.add(canonicalTitle);
       progress.visited.add(canonicalTitle);
       const links = PAGE_LINK_LIMIT === undefined ? result.links : result.links.slice(0, PAGE_LINK_LIMIT);
-      collectedLinks.set(title, links.length);
+      collectedLinks.set(title, links.map(normalizeTitle));
       const nodeId = canonicalTitle;
       progress.linksByNode.set(nodeId, [...(progress.linksByNode.get(nodeId) ?? []), ...links.map(normalizeTitle)]);
+      if (result.complete || (PAGE_LINK_LIMIT !== undefined && links.length >= PAGE_LINK_LIMIT)) {
+        satisfiedTitles.add(title);
+      }
 
       if (!progress.nodeIds.has(nodeId)) {
         progress.nodes.push({
@@ -207,38 +214,41 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     onBatch?.(progress.nodes.filter((node) => !batchNodeIds.has(node.id)), []);
 
     let continueToken = batchResponse.continueToken;
-    while (
-      continueToken &&
-      progress.nodes.length < maxNodes &&
-      requestsUsed < requestBudget &&
-      batchResults.some((item) => item !== null && item.currentDepth < depth) &&
-      (PAGE_LINK_LIMIT === undefined || Array.from(collectedLinks.values()).some((count) => count < PAGE_LINK_LIMIT))
-    ) {
-      const paginatedResponse = await fetchBatch(continueToken);
+    while (continueToken && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
+      const activeItems = batchResults.filter((item) => item !== null && item.currentDepth < depth && !satisfiedTitles.has(item.title));
+      if (activeItems.length === 0) break;
+      const tokenPageId = Number(continueToken.split('|')[0]);
+      const pointsIntoSatisfiedPage = Number.isFinite(tokenPageId) && batchResponse.pages.some((page) => (
+        page.pageid === tokenPageId && satisfiedTitles.has(page.title)
+      ));
+      // A shared continuation can keep draining a page that is already complete.
+      // Restart only unsatisfied titles without plcontinue when that happens.
+      const paginatedResponse = await fetchBatch(
+        activeItems.map((item) => item!.title),
+        pointsIntoSatisfiedPage ? undefined : continueToken,
+      );
       if (!paginatedResponse) {
         break;
       }
 
       for (const paginatedResult of paginatedResponse.pages) {
-        const currentCount = collectedLinks.get(paginatedResult.title);
+        const currentLinks = collectedLinks.get(paginatedResult.title);
         const item = batchResults.find((batchItem) => batchItem?.title === paginatedResult.title);
         if (
-          currentCount === undefined ||
+          currentLinks === undefined ||
           !item ||
           item.currentDepth >= depth ||
-          (PAGE_LINK_LIMIT !== undefined && currentCount >= PAGE_LINK_LIMIT)
+          satisfiedTitles.has(item.title)
         ) continue;
 
-        const remaining = PAGE_LINK_LIMIT === undefined ? paginatedResult.links.length : PAGE_LINK_LIMIT - currentCount;
+        const remaining = PAGE_LINK_LIMIT === undefined ? paginatedResult.links.length : PAGE_LINK_LIMIT - currentLinks.length;
         if (remaining <= 0) continue;
         const paginatedLinks = paginatedResult.links.slice(0, remaining);
         const nodeId = getCanonicalTitle(item.title, progress.resolvedTitles);
-        progress.linksByNode.set(nodeId, [
-          ...(progress.linksByNode.get(nodeId) ?? []),
-          ...paginatedLinks.map(normalizeTitle),
-        ]);
+        const newLinks = paginatedLinks.map(normalizeTitle).filter((link) => !currentLinks.includes(link));
+        progress.linksByNode.set(nodeId, [...(progress.linksByNode.get(nodeId) ?? []), ...newLinks]);
 
-        for (const link of paginatedLinks) {
+        for (const link of newLinks) {
           const normalizedLink = normalizeTitle(link);
           const canonicalLink = getCanonicalTitle(normalizedLink, progress.resolvedTitles);
 
@@ -253,11 +263,31 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
           }
         }
 
-        collectedLinks.set(paginatedResult.title, currentCount + paginatedLinks.length);
+        collectedLinks.set(paginatedResult.title, [...currentLinks, ...newLinks]);
+        if (paginatedResult.complete || (PAGE_LINK_LIMIT !== undefined && currentLinks.length + newLinks.length >= PAGE_LINK_LIMIT)) {
+          satisfiedTitles.add(item.title);
+        }
       }
 
       continueToken = paginatedResponse.continueToken;
     }
+  };
+
+  while (progress.queue.length > 0 && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
+    const layerDepth = progress.queue[0].depth;
+    const layer = progress.queue.splice(0, progress.queue.length).filter((item) => item.depth === layerDepth);
+    const batches: { title: string; depth: number }[][] = [];
+    for (let index = 0; index < layer.length; index += WIKIPEDIA_BATCH_SIZE) {
+      batches.push(layer.slice(index, index + WIKIPEDIA_BATCH_SIZE));
+    }
+    activeWork = layer.length;
+    let nextBatchIndex = 0;
+    const workers = Array.from({ length: Math.min(crawlConcurrency, batches.length) }, async () => {
+      while (nextBatchIndex < batches.length && requestsUsed < requestBudget) {
+        await processBatch(batches[nextBatchIndex++]);
+      }
+    });
+    await Promise.all(workers);
   }
 
   const edgeKeys = new Set<string>();

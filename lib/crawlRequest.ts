@@ -5,8 +5,8 @@ export interface CrawlRequest {
   nonce: number;
 }
 
-export const DEFAULT_DEPTH = 3;
-export const DEFAULT_MAX_NODES = 500;
+export const DEFAULT_DEPTH = 2;
+export const DEFAULT_MAX_NODES = 150;
 
 function parseBoundedNumber(value: string | null, fallback: number, min: number, max: number): number {
   if (value === null || value.trim() === '') return fallback;

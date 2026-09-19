@@ -26,8 +26,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validatedDepth = Math.min(Math.max(depth || 3, 1), 3);
-    const validatedMaxNodes = Math.min(Math.max(maxNodes || 500, 50), 500);
+    const validatedDepth = Math.min(Math.max(depth || 2, 1), 3);
+    const validatedMaxNodes = Math.min(Math.max(maxNodes || 150, 50), 500);
 
     const seedPage = await getPageLinks(seedTitle);
     if (seedPage.missing) {
@@ -100,10 +100,14 @@ export async function POST(request: NextRequest) {
           const seedId = baseGraph?.seedId ?? crawledSeedId;
           const { nodes: analyzedNodes, communities } = analyzeGraph(graph, seedId);
 
-          sendStreamEvent(controller, 'analysis', {
-            nodes: analyzedNodes,
-            communities,
-          });
+          const metrics = Object.fromEntries(analyzedNodes.map((node) => [node.id, {
+            pagerank: node.pagerank,
+            betweenness: node.betweenness,
+            communityId: node.communityId,
+            inDegree: node.inDegree,
+            outDegree: node.outDegree,
+          }]));
+          sendStreamEvent(controller, 'analysis', { metrics, communities });
 
           const topNodes = analyzedNodes
             .sort((a, b) => b.pagerank - a.pagerank)

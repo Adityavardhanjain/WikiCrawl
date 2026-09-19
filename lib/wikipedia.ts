@@ -123,6 +123,8 @@ export interface PageLinksResult {
   title: string;
   resolvedTitle: string;
   links: string[];
+  complete: boolean;
+  pageid?: number;
   missing?: boolean;
 }
 
@@ -132,6 +134,17 @@ export interface PageLinksBatchResult {
 }
 
 const MAX_BATCH_TITLES = 50;
+
+const accumulatedPages = new Map<string, { resolvedTitle: string; links: string[] }>();
+
+function normalizeTitle(title: string): string {
+  return title.replace(/_/g, ' ').trim().toLowerCase();
+}
+
+function continuationPageId(token?: string): number | undefined {
+  const pageId = Number(token?.split('|')[0]);
+  return Number.isFinite(pageId) ? pageId : undefined;
+}
 
 export async function getPageLinksBatch(
   titles: string[],
@@ -147,7 +160,7 @@ export async function getPageLinksBatch(
     if (continueToken) return true;
 
     const cachedPage = getCachedPageLinks(title);
-    if (!cachedPage) return true;
+    if (!cachedPage || !cachedPage.complete) return true;
 
     cachedPages.set(title, { ...cachedPage, title });
     return false;
@@ -177,6 +190,7 @@ export async function getPageLinksBatch(
   const redirects = data.query?.redirects || [];
   const redirectMap = new Map(redirects.map((redirect) => [redirect.from || redirect.title || '', redirect.to]));
 
+  const nextPageId = continuationPageId(data['continue']?.plcontinue);
   const fetchedPages = missingTitles.map((title) => {
     const resolvedTitle = redirectMap.get(title) || title;
     const normalizedResolvedTitle = resolvedTitle.toLowerCase();
@@ -186,19 +200,37 @@ export async function getPageLinksBatch(
     ));
 
     if (!page || page.missing) {
-      return { title, resolvedTitle: title, links: [], missing: true };
+      return { title, resolvedTitle: title, links: [], complete: true, missing: true };
     }
+
+    const pageLinks = page.links?.map((link) => link.title) || [];
+    const key = normalizeTitle(title);
+    const accumulated = accumulatedPages.get(key) ?? { resolvedTitle: page.title || resolvedTitle, links: [] };
+    for (const link of pageLinks) {
+      if (!accumulated.links.includes(link)) accumulated.links.push(link);
+    }
+    accumulated.resolvedTitle = page.title || resolvedTitle;
+    accumulatedPages.set(key, accumulated);
 
     return {
       title,
       resolvedTitle: page.title || resolvedTitle,
-      links: page.links?.map((link) => link.title) || [],
+      links: pageLinks,
+      pageid: page.pageid,
+      complete: !data['continue']?.plcontinue || (nextPageId !== undefined && page.pageid !== undefined && nextPageId > page.pageid),
     };
   });
 
-  if (!data['continue']?.plcontinue && !continueToken) {
-    for (const page of fetchedPages) {
-      if (!page.missing) setCachedPageLinks(page);
+  for (const page of fetchedPages) {
+    if (!page.missing && page.complete) {
+      const accumulated = accumulatedPages.get(normalizeTitle(page.title));
+      setCachedPageLinks({
+        title: page.title,
+        resolvedTitle: accumulated?.resolvedTitle ?? page.resolvedTitle,
+        links: accumulated?.links ?? page.links,
+        complete: true,
+      });
+      accumulatedPages.delete(normalizeTitle(page.title));
     }
   }
 

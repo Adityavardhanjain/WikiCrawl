@@ -9,6 +9,7 @@ export interface CachedPageLinks {
   title: string;
   resolvedTitle: string;
   links: string[];
+  complete: boolean;
 }
 
 let db: Database.Database | null = null;
@@ -65,10 +66,12 @@ export function getCachedPageLinks(title: string): CachedPageLinks | null {
       return null;
     }
 
+    const parsedLinks = JSON.parse(row.links) as string[] | { links: string[]; complete?: boolean };
     return {
       title: row.title,
       resolvedTitle: row.resolved_title,
-      links: JSON.parse(row.links) as string[],
+      links: Array.isArray(parsedLinks) ? parsedLinks : parsedLinks.links,
+      complete: Array.isArray(parsedLinks) ? true : parsedLinks.complete !== false,
     };
   } catch (error) {
     console.error('Error reading page links cache:', error);

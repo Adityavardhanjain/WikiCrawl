@@ -1,12 +1,12 @@
 import Graph from 'graphology';
 import { getPageLinksBatch, titleToUrl } from './wikipedia';
-import type { WikiNode, WikiEdge } from '@/types/graph';
+import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
 
 const WIKIPEDIA_BATCH_SIZE = 8;
 const MAX_EDGES_PER_NODE = 50;
 const MAX_REQUEST_BUDGET = 500;
 
-interface CrawlProgress {
+interface CrawlState {
   nodes: WikiNode[];
   nodeIds: Set<string>;
   edges: WikiEdge[];
@@ -48,7 +48,7 @@ export interface CrawlOptions {
   seedTitle: string;
   depth: number;
   maxNodes: number;
-  onProgress?: (visited: number, total: number) => void;
+  onProgress?: (progress: CrawlProgress) => void;
   onBatch?: (nodes: WikiNode[], edges: WikiEdge[]) => void;
 }
 
@@ -61,7 +61,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   const requestBudget = getCrawlRequestBudget(maxNodes, depth);
   const pageLinkLimit = Math.min(300, Math.max(120, maxNodes));
 
-  const progress: CrawlProgress = {
+  const progress: CrawlState = {
     nodes: [],
     nodeIds: new Set(),
     edges: [],
@@ -78,13 +78,24 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   progress.queue.push({ title: seedNormalized, depth: 0 });
   queuedTitles.add(seedNormalized);
 
-  let visited = 0;
+  let progressTarget = 1;
+  let activeWork = 0;
   let requestsUsed = 0;
+
+  const emitProgress = (complete = false) => {
+    const done = progress.nodes.length;
+    const knownWork = done + activeWork + progress.queue.length;
+    progressTarget = complete
+      ? done
+      : Math.min(maxNodes, Math.max(progressTarget, done, knownWork));
+    onProgress?.({ done, target: Math.max(progressTarget, done) });
+  };
 
   while (progress.queue.length > 0 && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
     const batchSize = Math.min(WIKIPEDIA_BATCH_SIZE, progress.queue.length, requestBudget - requestsUsed);
     const batch = progress.queue.splice(0, batchSize);
     if (batch.length === 0) break;
+    activeWork = batch.length;
 
     const batchTitles = batch.map(({ title }) => title);
     const batchNodeIds = new Set(progress.nodes.map((node) => node.id));
@@ -103,25 +114,28 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
         return null;
       }
 
+      if (result.missing) {
+        return null;
+      }
+
       return { title, currentDepth, result, canonicalTitle };
     });
 
     const collectedLinks = new Map<string, number>();
 
     for (const item of batchResults) {
-      if (!item) continue;
+      if (!item) {
+        activeWork -= 1;
+        continue;
+      }
 
       const { title, currentDepth, result, canonicalTitle } = item;
       if (progress.visited.has(canonicalTitle)) {
+        activeWork -= 1;
         continue;
       }
 
       progress.visited.add(canonicalTitle);
-      visited++;
-
-      if (onProgress) {
-        onProgress(visited, Math.max(progress.nodes.length, 1));
-      }
 
       if (result.resolvedTitle !== normalizeTitle(title)) {
         progress.resolvedTitles.set(normalizeTitle(title), result.resolvedTitle);
@@ -174,6 +188,9 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
           }
         }
       }
+
+      activeWork -= 1;
+      emitProgress();
 
     }
 
@@ -258,6 +275,10 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   progress.edges = progress.edges.filter((edge) => (
     progress.nodeIds.has(edge.source) && progress.nodeIds.has(edge.target)
   ));
+
+  if (progress.queue.length === 0) {
+    emitProgress(true);
+  }
 
   // Calculate in-degrees
   const inDegreeMap = new Map<string, number>();

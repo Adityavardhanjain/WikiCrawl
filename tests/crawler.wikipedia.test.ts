@@ -8,6 +8,7 @@ vi.mock('../lib/db', () => ({
 
 import { crawlWikipedia } from '../lib/crawler';
 import { getPageLinksBatch } from '../lib/wikipedia';
+import { setCachedPageLinks } from '../lib/db';
 
 describe('offline crawler', () => {
   beforeEach(() => {
@@ -16,14 +17,14 @@ describe('offline crawler', () => {
 
   it('crawls a small graph with bounded nodes, unique edges, and depth metadata', async () => {
     const mock = installMockMediaWiki();
-    const progress: Array<{ visited: number; total: number }> = [];
+    const progress: Array<{ done: number; target: number }> = [];
 
     try {
       const result = await crawlWikipedia({
         seedTitle: 'Page 0',
         depth: 2,
         maxNodes: 20,
-        onProgress: (visited, total) => progress.push({ visited, total }),
+        onProgress: (update) => progress.push(update),
       });
 
       expect(result.nodes.length).toBeGreaterThan(0);
@@ -35,11 +36,32 @@ describe('offline crawler', () => {
       expect(result.nodes.every((node) => node.depth >= 0 && node.depth <= 2)).toBe(true);
       expect(result.nodes.find((node) => node.id === 'Page 0')?.depth).toBe(0);
       expect(progress.length).toBe(result.nodes.length);
-      expect(progress.map(({ visited }) => visited)).toEqual(
+      expect(progress.map(({ done }) => done)).toEqual(
         Array.from({ length: progress.length }, (_, index) => index + 1),
       );
-      expect(progress.every(({ total }) => total >= 1)).toBe(true);
+      expect(progress.every(({ target }) => target >= 1)).toBe(true);
       expect(mock.stats.requests).toBeGreaterThan(0);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('reports monotonic varied progress through a large crawl', async () => {
+    const mock = installMockMediaWiki();
+    const progress: Array<{ done: number; target: number }> = [];
+
+    try {
+      await crawlWikipedia({
+        seedTitle: 'Page 0',
+        depth: 3,
+        maxNodes: 500,
+        onProgress: (update) => progress.push(update),
+      });
+
+      const ratios = progress.map(({ done, target }) => done / target);
+      expect(ratios).toEqual([...ratios].sort((left, right) => left - right));
+      expect(new Set(ratios).size).toBeGreaterThan(5);
+      expect(ratios.at(-1)).toBe(1);
     } finally {
       mock.restore();
     }
@@ -60,6 +82,19 @@ describe('offline crawler', () => {
       expect(secondPage.continueToken).toBeUndefined();
       expect(mock.stats.requests).toBe(2);
       expect(mock.stats.linkRowsDownloaded).toBe(650);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('does not cache missing pages', async () => {
+    const mock = installMockMediaWiki();
+    vi.mocked(setCachedPageLinks).mockClear();
+
+    try {
+      const result = await getPageLinksBatch(['Typoed article']);
+      expect(result.pages[0]?.missing).toBe(true);
+      expect(setCachedPageLinks).not.toHaveBeenCalled();
     } finally {
       mock.restore();
     }

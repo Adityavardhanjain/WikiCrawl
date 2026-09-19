@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { crawlWikipedia, buildGraph, sanitizeGraphData } from '@/lib/crawler';
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { getCachedResult, setCachedResult, generateCacheKey } from '@/lib/db';
-import { getPageExtract } from '@/lib/wikipedia';
+import { getPageExtract, getPageLinks, searchWikipedia } from '@/lib/wikipedia';
 import { nanoid } from 'nanoid';
-import type { CrawlResult, CrawlRequest } from '@/types/graph';
+import type { CrawlProgress, CrawlResult, CrawlRequest } from '@/types/graph';
 
 const encoder = new TextEncoder();
 
@@ -29,6 +29,17 @@ export async function POST(request: NextRequest) {
     const validatedDepth = Math.min(Math.max(depth || 3, 1), 3);
     const validatedMaxNodes = Math.min(Math.max(maxNodes || 500, 50), 500);
 
+    const seedPage = await getPageLinks(seedTitle);
+    if (seedPage.missing) {
+      const suggestions = await searchWikipedia(seedTitle)
+        .then((results) => results.map((result) => result.title))
+        .catch(() => []);
+      return NextResponse.json(
+        { error: 'not_found', title: seedTitle, suggestions },
+        { status: 404 },
+      );
+    }
+
     const cacheKey = generateCacheKey(seedTitle, validatedDepth, validatedMaxNodes);
     const cachedResult = baseGraph ? null : getCachedResult(cacheKey);
 
@@ -39,14 +50,13 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const crawlProgress = { visited: 0, total: 1 };
+          let crawlProgress: CrawlProgress = { done: 0, target: 1 };
           const { nodes: crawledNodes, edges: crawledEdges, seedId: crawledSeedId } = await crawlWikipedia({
             seedTitle,
             depth: validatedDepth,
             maxNodes: validatedMaxNodes,
-            onProgress: (visited, total) => {
-              crawlProgress.visited = visited;
-              crawlProgress.total = Math.max(total, 1);
+            onProgress: (progress) => {
+              crawlProgress = progress;
               sendStreamEvent(controller, 'progress', { progress: crawlProgress });
             },
             onBatch: (nodes, edges) => {
@@ -125,7 +135,7 @@ export async function POST(request: NextRequest) {
             communities,
             crawledAt: new Date().toISOString(),
             positions,
-            progress: { visited: crawlProgress.visited, total: Math.max(crawlProgress.total, 1) },
+            progress: { done: 1, target: 1 },
           };
 
           if (!baseGraph) {

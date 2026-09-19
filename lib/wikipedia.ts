@@ -28,22 +28,18 @@ interface WikipediaSearchResult {
   title: string;
 }
 
-interface WikipediaExtract {
-  extract?: string;
-}
-
 interface WikipediaPage {
-  pageid: number;
+  pageid?: number;
   title: string;
+  missing?: boolean;
   links?: WikipediaLink[];
   extract?: string;
-  redirect?: { title: string };
 }
 
 interface WikipediaResponse {
   query?: {
-    pages?: Record<string, WikipediaPage>;
-    redirects?: { title: string; to: string }[];
+    pages?: WikipediaPage[];
+    redirects?: { from?: string; title?: string; to: string }[];
   };
   'continue'?: {
     plcontinue?: string;
@@ -109,6 +105,7 @@ export async function searchWikipedia(query: string): Promise<WikipediaSearchRes
 export async function getPageExtract(title: string): Promise<string | null> {
   const data = await fetchWikipedia({
     action: 'query',
+    formatversion: '2',
     titles: title,
     prop: 'extracts',
     exintro: '1',
@@ -116,19 +113,17 @@ export async function getPageExtract(title: string): Promise<string | null> {
     exsentences: '3',
   });
 
-  const pages = data.query?.pages;
-  if (!pages) return null;
-  
-  const pageId = Object.keys(pages)[0];
-  if (pageId === '-1') return null; // Page doesn't exist
-  
-  return pages[pageId].extract || null;
+  const page = data.query?.pages?.[0];
+  if (!page || page.missing) return null;
+
+  return page.extract || null;
 }
 
 export interface PageLinksResult {
   title: string;
   resolvedTitle: string;
   links: string[];
+  missing?: boolean;
 }
 
 export interface PageLinksBatchResult {
@@ -164,6 +159,7 @@ export async function getPageLinksBatch(
 
   const params: Record<string, string> = {
     action: 'query',
+    formatversion: '2',
     titles: missingTitles.join('|'),
     prop: 'links',
     plnamespace: '0', // Only article pages
@@ -177,29 +173,32 @@ export async function getPageLinksBatch(
 
   const data = await fetchWikipedia(params);
   
-  const pages = data.query?.pages;
+  const pages = data.query?.pages || [];
   const redirects = data.query?.redirects || [];
-  const redirectMap = new Map(redirects.map(r => [r.title, r.to]));
+  const redirectMap = new Map(redirects.map((redirect) => [redirect.from || redirect.title || '', redirect.to]));
 
   const fetchedPages = missingTitles.map((title) => {
     const resolvedTitle = redirectMap.get(title) || title;
     const normalizedResolvedTitle = resolvedTitle.toLowerCase();
     const normalizedTitle = title.toLowerCase();
-    const page = Object.values(pages || {}).find((candidate) => (
-      candidate.pageid !== -1 &&
+    const page = pages.find((candidate) => (
       (candidate.title.toLowerCase() === normalizedResolvedTitle || candidate.title.toLowerCase() === normalizedTitle)
     ));
 
+    if (!page || page.missing) {
+      return { title, resolvedTitle: title, links: [], missing: true };
+    }
+
     return {
       title,
-      resolvedTitle: page?.title || resolvedTitle,
-      links: page?.links?.map((link) => link.title) || [],
+      resolvedTitle: page.title || resolvedTitle,
+      links: page.links?.map((link) => link.title) || [],
     };
   });
 
   if (!data['continue']?.plcontinue && !continueToken) {
     for (const page of fetchedPages) {
-      setCachedPageLinks(page);
+      if (!page.missing) setCachedPageLinks(page);
     }
   }
 

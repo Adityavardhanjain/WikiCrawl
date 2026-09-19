@@ -3,7 +3,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import type { Community, CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
+import type { Community, CrawlProgress, CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
+import { createCrawlRequest, getCrawlPayload, parseCrawlParams, type CrawlRequest } from '@/lib/crawlRequest';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
 import { Sidebar } from './components/Sidebar';
@@ -23,6 +24,12 @@ const GraphCanvas = dynamic(
 );
 
 type ColorMode = 'community' | 'depth';
+
+class CrawlNotFoundError extends Error {
+  constructor(public readonly title: string, public readonly suggestions: string[]) {
+    super('not_found');
+  }
+}
 
 function validateGraphData(data: Partial<CrawlResult> | null | undefined): string[] {
   if (!data) {
@@ -92,7 +99,7 @@ function validateGraphData(data: Partial<CrawlResult> | null | undefined): strin
 
 async function readCrawlResponse(
   response: Response,
-  onProgress?: (visited: number, total: number) => void,
+  onProgress?: (progress: CrawlProgress) => void,
   handlers?: {
     onNodes?: (nodes: WikiNode[]) => void;
     onEdges?: (edges: WikiEdge[]) => void;
@@ -102,11 +109,15 @@ async function readCrawlResponse(
 ): Promise<CrawlResult> {
   if (!response.ok) {
     const errorData = await response.json();
+    if (response.status === 404 && errorData.error === 'not_found') {
+      throw new CrawlNotFoundError(errorData.title, errorData.suggestions ?? []);
+    }
     throw new Error(errorData.error || 'Failed to crawl');
   }
 
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/event-stream')) {
+    onProgress?.({ done: 1, target: 1 });
     return response.json() as Promise<CrawlResult>;
   }
 
@@ -133,13 +144,16 @@ async function readCrawlResponse(
       const payload = JSON.parse(dataLine.slice(5).trim());
       const event = eventLine?.slice(6).trim();
       if (payload?.progress && onProgress) {
-        onProgress(payload.progress.visited, payload.progress.total);
+        onProgress(payload.progress as CrawlProgress);
       }
       if (event === 'nodes') handlers?.onNodes?.(payload.nodes ?? []);
       if (event === 'edges') handlers?.onEdges?.(payload.edges ?? []);
       if (event === 'analysis') handlers?.onAnalysis?.(payload.nodes ?? [], payload.communities ?? []);
       if (event === 'extracts') handlers?.onExtracts?.(payload.extracts ?? []);
-      if (payload?.result) finalResult = payload.result as CrawlResult;
+      if (payload?.result) {
+        finalResult = payload.result as CrawlResult;
+        if (event === 'done') onProgress?.({ done: 1, target: 1 });
+      }
       if (payload?.error) throw new Error(payload.error);
     }
   }
@@ -161,9 +175,9 @@ export default function Home() {
   const queryClient = useQueryClient();
   
   // State
-  const [seedTitle, setSeedTitle] = useState('');
   const [depth, setDepth] = useState(3);
   const [maxNodes, setMaxNodes] = useState(500);
+  const [submittedRequest, setSubmittedRequest] = useState<CrawlRequest | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>('community');
   const [selectedNode, setSelectedNode] = useState<WikiNode | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
@@ -171,11 +185,14 @@ export default function Home() {
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
   const previousDataRef = useRef<CrawlResult | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState<{ title: string; suggestions: string[] } | null>(null);
   const [explorationHistory, setExplorationHistory] = useState<Array<{ id: string; title: string }>>([]);
   const liveUpdateRef = useRef<((current: CrawlResult) => CrawlResult) | null>(null);
   const liveUpdateFrameRef = useRef<number | null>(null);
+  const submittedRequestRef = useRef<CrawlRequest | null>(null);
+  const requestNonceRef = useRef(0);
 
-  const mergeLiveData = useCallback((update: (current: CrawlResult) => CrawlResult) => {
+  const mergeLiveData = useCallback((request: CrawlRequest, update: (current: CrawlResult) => CrawlResult) => {
     const pendingUpdate = liveUpdateRef.current;
     liveUpdateRef.current = pendingUpdate
       ? (current) => update(pendingUpdate(current))
@@ -187,11 +204,11 @@ export default function Home() {
       const pendingUpdate = liveUpdateRef.current;
       liveUpdateRef.current = null;
       liveUpdateFrameRef.current = null;
-      if (!pendingUpdate) return;
+      if (!pendingUpdate || submittedRequestRef.current?.nonce !== request.nonce) return;
 
       setLiveData((current) => pendingUpdate(current ?? {
         id: 'streaming',
-        seedId: seedTitle,
+        seedId: request.seed,
         nodes: [],
         edges: [],
         communities: [],
@@ -199,7 +216,7 @@ export default function Home() {
         positions: {},
       }));
     });
-  }, [seedTitle]);
+  }, []);
 
   useEffect(() => () => {
     if (liveUpdateFrameRef.current !== null) {
@@ -207,37 +224,41 @@ export default function Home() {
     }
   }, []);
 
-  const updateLoadingProgress = useCallback((visited: number, total: number) => {
-    const safeTotal = Math.max(total, 1);
-    const percent = Math.min(95, Math.round((visited / safeTotal) * 100));
-    setLoadingProgress(percent);
+  const updateLoadingProgress = useCallback((progress: CrawlProgress) => {
+    const safeTarget = Math.max(progress.target, 1);
+    const ratio = Math.min(1, Math.max(0, progress.done / safeTarget));
+    setLoadingProgress((current) => Math.max(current, ratio));
   }, []);
 
   // Query for crawl data
   const { data, isLoading, error, refetch } = useQuery<CrawlResult>({
-    queryKey: ['crawl', seedTitle, depth, maxNodes],
+    queryKey: submittedRequest
+      ? ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce]
+      : ['crawl', 'idle'],
     queryFn: async () => {
+      if (!submittedRequest) throw new Error('No crawl request submitted');
+      const request = submittedRequest;
       try {
         const response = await fetch('/api/crawl', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ seedTitle, depth, maxNodes }),
+          body: JSON.stringify(getCrawlPayload(request)),
         });
         const result = await readCrawlResponse(response, updateLoadingProgress, {
-          onNodes: (nodes) => mergeLiveData((current) => ({
+          onNodes: (nodes) => mergeLiveData(request, (current) => ({
             ...current,
             nodes: Array.from(new Map([...current.nodes, ...nodes].filter((node) => node?.id).map((node) => [node.id, node])).values()),
           })),
-          onEdges: (edges) => mergeLiveData((current) => ({
+          onEdges: (edges) => mergeLiveData(request, (current) => ({
             ...current,
             edges: Array.from(new Map([...current.edges, ...edges].filter((edge) => edge?.source && edge?.target).map((edge) => [`${edge.source}|${edge.target}`, edge])).values()),
           })),
-          onAnalysis: (nodes, communities) => mergeLiveData((current) => ({
+          onAnalysis: (nodes, communities) => mergeLiveData(request, (current) => ({
             ...current,
             nodes: Array.from(new Map([...current.nodes, ...nodes].filter((node) => node?.id).map((node) => [node.id, node])).values()),
             communities,
           })),
-          onExtracts: (extracts) => mergeLiveData((current) => ({
+          onExtracts: (extracts) => mergeLiveData(request, (current) => ({
             ...current,
             nodes: current.nodes.map((node) => {
               const extract = extracts.find((item) => item.nodeId === node.id)?.extract;
@@ -247,14 +268,22 @@ export default function Home() {
         });
         const issues = validateGraphData(result);
         if (issues.length > 0) throw new Error(issues[0]);
+        if (submittedRequestRef.current?.nonce === request.nonce) {
+          setLiveData(null);
+        }
         return result;
       } catch (error) {
+        if (error instanceof CrawlNotFoundError) {
+          setNotFound({ title: error.title, suggestions: error.suggestions });
+          setGraphError(null);
+          throw error;
+        }
         const message = error instanceof Error ? error.message : 'Unable to explore this topic right now.';
         setGraphError(message);
         throw error;
       }
     },
-    enabled: false,
+    enabled: submittedRequest !== null,
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
 
@@ -285,7 +314,6 @@ export default function Home() {
 
   useEffect(() => {
     if (!isLoading) {
-      setLoadingProgress(100);
       const timeout = window.setTimeout(() => setLoadingProgress(0), 300);
       return () => window.clearTimeout(timeout);
     }
@@ -316,7 +344,12 @@ export default function Home() {
     },
     onSuccess: (newData) => {
       if (displayData) {
-        queryClient.setQueryData(['crawl', seedTitle, depth, maxNodes], newData);
+        if (submittedRequest) {
+          queryClient.setQueryData(
+            ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce],
+            newData,
+          );
+        }
       }
     },
     onError: (error) => {
@@ -327,25 +360,27 @@ export default function Home() {
   // Handle search
   const handleSearch = useCallback((title: string) => {
     previousDataRef.current = data ?? liveData;
+    const request = createCrawlRequest(title, depth, maxNodes, ++requestNonceRef.current);
     const url = new URL(window.location.href);
     url.searchParams.set('seed', title);
-    url.searchParams.set('depth', depth.toString());
-    url.searchParams.set('nodes', maxNodes.toString());
+    url.searchParams.set('depth', request.depth.toString());
+    url.searchParams.set('nodes', request.maxNodes.toString());
     window.history.replaceState({}, '', url.toString());
-    queryClient.removeQueries({ queryKey: ['crawl'] });
-    setSeedTitle(title);
+    submittedRequestRef.current = request;
+    setSubmittedRequest(request);
+    liveUpdateRef.current = null;
+    if (liveUpdateFrameRef.current !== null) {
+      window.cancelAnimationFrame(liveUpdateFrameRef.current);
+      liveUpdateFrameRef.current = null;
+    }
     setLiveData(null);
+    setLoadingProgress(0);
     setGraphError(null);
+    setNotFound(null);
     setSelectedNode(null);
     setFocusedNode(null);
     setExplorationHistory([]);
-  }, [data, depth, liveData, maxNodes, queryClient]);
-
-  useEffect(() => {
-    if (seedTitle) {
-      refetch();
-    }
-  }, [seedTitle, refetch]);
+  }, [data, depth, liveData, maxNodes]);
 
   // Handle node click
   const handleNodeClick = useCallback((node: WikiNode) => {
@@ -378,30 +413,18 @@ export default function Home() {
     expandMutation.mutate(nodeId);
   }, [expandMutation]);
 
-  // Shareable URL
-  useEffect(() => {
-    if (displayData && displayData.seedId && displayData.seedId === seedTitle) {
-      const url = new URL(window.location.href);
-      url.searchParams.set('seed', displayData.seedId);
-      url.searchParams.set('depth', depth.toString());
-      url.searchParams.set('nodes', maxNodes.toString());
-      window.history.replaceState({}, '', url.toString());
-    }
-  }, [displayData, depth, maxNodes, seedTitle]);
-
   // Load from URL params
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const seed = params.get('seed');
-    const d = params.get('depth');
-    const n = params.get('nodes');
-    
+    const { seed, depth: urlDepth, maxNodes: urlMaxNodes } = parseCrawlParams(window.location.search);
+    setDepth(urlDepth);
+    setMaxNodes(urlMaxNodes);
+
     if (seed) {
-      setSeedTitle(seed);
-      if (d) setDepth(parseInt(d));
-      if (n) setMaxNodes(parseInt(n));
+      const request = createCrawlRequest(seed, urlDepth, urlMaxNodes, ++requestNonceRef.current);
+      submittedRequestRef.current = request;
+      setSubmittedRequest(request);
     }
-  }, [refetch]);
+  }, []);
 
   useEffect(() => {
     if (!data) return;
@@ -424,12 +447,12 @@ export default function Home() {
             <div className="mb-4">
               <div className="mb-2 flex items-center justify-between text-xs text-slate-300">
                 <span>Crawling Wikipedia</span>
-                <span>{Math.min(Math.round(loadingProgress), 99)}%</span>
+                <span>{Math.round(loadingProgress * 100)}%</span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-slate-700/80">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 transition-all duration-500 ease-out"
-                  style={{ width: `${loadingProgress}%` }}
+                  style={{ width: `${loadingProgress * 100}%` }}
                 />
               </div>
             </div>
@@ -521,13 +544,41 @@ export default function Home() {
 
           {isLoading && displayData && (
             <div className="absolute inset-x-4 top-4 z-30 flex justify-center">
-              <div className="rounded-full border border-cyan-500/30 bg-slate-950/80 px-4 py-2 text-xs text-cyan-200 shadow-lg backdrop-blur-md">
-                Exploring a new neighborhood...
+              <div className="flex items-center gap-3 rounded-full border border-cyan-500/30 bg-slate-950/80 px-4 py-2 text-xs text-cyan-200 shadow-lg backdrop-blur-md">
+                <span>Exploring a new neighborhood...</span>
+                <span className="w-24 text-right tabular-nums transition-opacity duration-300">{Math.round(loadingProgress * 100)}%</span>
+                <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/80">
+                  <span
+                    className="block h-full rounded-full bg-cyan-400 transition-[width] duration-300 ease-out"
+                    style={{ width: `${loadingProgress * 100}%` }}
+                  />
+                </span>
               </div>
             </div>
           )}
 
-          {error && !displayData && (
+          {notFound && (
+            <div className="absolute inset-0 flex items-center justify-center px-6">
+              <div className="glass-strong max-w-lg rounded-2xl border border-cyan-500/30 p-8 text-center">
+                <p className="mb-2 text-lg font-semibold text-cyan-300">No Wikipedia article named &quot;{notFound.title}&quot;</p>
+                <p className="mb-5 text-sm text-slate-400">Try one of these related articles:</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {notFound.suggestions.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => handleSearch(suggestion)}
+                      className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-200 transition hover:bg-cyan-400/20 hover:text-white"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {error && !notFound && !displayData && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center p-8 glass-strong rounded-2xl max-w-md border border-red-500/30">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
@@ -610,7 +661,7 @@ export default function Home() {
             </div>
           )}
 
-          {!displayData && !isLoading && !error && (
+          {!displayData && !isLoading && !error && !notFound && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="atlas-empty-state text-center max-w-xl">
                 {/* Animated icon */}

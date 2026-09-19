@@ -25,6 +25,10 @@ function pageNumber(title: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function isKnownPage(title: string): boolean {
+  return pageNumber(title) !== null;
+}
+
 function defaultLinks(title: string): string[] {
   const number = pageNumber(title) ?? 0;
   const count = number === 0 ? 650 : 120;
@@ -51,11 +55,14 @@ function responseFor(
   const pages = titles
     .map((title) => {
       const normalizedTitle = normalizeTitle(title);
+      if (!isKnownPage(normalizedTitle)) {
+        return { title: normalizedTitle, missing: true };
+      }
       const links = mode === 'topical' ? topicalLinks(normalizedTitle) : defaultLinks(normalizedTitle);
       const pageLinks = links.slice(offset, offset + LINKS_PER_REQUEST);
       stats.linkRowsDownloaded += pageLinks.length;
       return {
-        pageid: pageNumber(normalizedTitle) ?? 0,
+        pageid: pageNumber(normalizedTitle)!,
         title: normalizedTitle,
         links: pageLinks.map((link) => ({ title: link })),
       };
@@ -63,6 +70,7 @@ function responseFor(
     .sort((left, right) => left.title.localeCompare(right.title));
 
   const hasMore = titles.some((title) => {
+    if (!isKnownPage(title)) return false;
     const links = mode === 'topical' ? topicalLinks(title) : defaultLinks(title);
     return offset + LINKS_PER_REQUEST < links.length;
   });
@@ -86,7 +94,7 @@ export function installMockMediaWiki(options: MockMediaWikiOptions = {}): MockMe
 
     if (action === 'opensearch') {
       const search = url.searchParams.get('search') || 'Page 0';
-      return Response.json([search, ['Page 0'], ['Synthetic page'], ['https://example.test/Page_0']]);
+      return Response.json([search, ['Page 0', 'Page 1'], ['Synthetic page'], ['https://example.test/Page_0']]);
     }
 
     if (action !== 'query' || url.searchParams.get('prop') !== 'links') {

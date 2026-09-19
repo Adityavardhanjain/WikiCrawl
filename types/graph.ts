@@ -23,6 +23,11 @@ export interface Community {
   topPages: string[];
 }
 
+export interface CrawlProgress {
+  done: number;
+  target: number;
+}
+
 export interface CrawlResult {
   id: string;
   seedId: string;
@@ -31,10 +36,7 @@ export interface CrawlResult {
   communities: Community[];
   crawledAt: string;
   positions: { [key: string]: { x: number; y: number } };
-  progress?: {
-    visited: number;
-    total: number;
-  };
+  progress?: CrawlProgress;
 }
 
 export interface SearchResult {

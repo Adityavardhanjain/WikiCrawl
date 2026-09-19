@@ -1,13 +1,14 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { getCrawlRequestBudget, shouldQueuePage } from './crawler.ts';
+import { describe, expect, it } from 'vitest';
+import { getCrawlRequestBudget, shouldQueuePage } from './crawler';
 
-test('request budget clamps to a sane maximum and stays above the minimum', () => {
-  assert.equal(getCrawlRequestBudget(50, 3), 500);
-  assert.equal(getCrawlRequestBudget(500, 3), 500);
-});
+describe('crawler helpers', () => {
+  it('clamps the request budget to a sane maximum and stays above the minimum', () => {
+    expect(getCrawlRequestBudget(50, 3)).toBe(500);
+    expect(getCrawlRequestBudget(500, 3)).toBe(500);
+  });
 
-test('duplicate queue entries are rejected while new pages are allowed', () => {
-  assert.equal(shouldQueuePage('Neural network', new Set(['neural network'])), false);
-  assert.equal(shouldQueuePage('Quantum mechanics', new Set(['Complexity science'])), true);
+  it('rejects duplicate queue entries while allowing new pages', () => {
+    expect(shouldQueuePage('Neural network', new Set(['Neural network']))).toBe(false);
+    expect(shouldQueuePage('Quantum mechanics', new Set(['Complexity science']))).toBe(true);
+  });
 });

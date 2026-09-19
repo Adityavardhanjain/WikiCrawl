@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import Graph from 'graphology';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import type { Community, CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
@@ -388,7 +387,7 @@ export default function Home() {
       url.searchParams.set('nodes', maxNodes.toString());
       window.history.replaceState({}, '', url.toString());
     }
-  }, [displayData, depth, maxNodes]);
+  }, [displayData, depth, maxNodes, seedTitle]);
 
   // Load from URL params
   useEffect(() => {

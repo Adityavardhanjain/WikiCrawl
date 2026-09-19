@@ -78,6 +78,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   };
 
   const queuedTitles = new Set<string>();
+  const emittedEdgeKeys = new Set<string>();
 
   // Start with the seed page
   const seedNormalized = normalizeTitle(seedTitle);
@@ -91,6 +92,26 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   let requestsUsed = 0;
   const configuredConcurrency = Number(process.env.CRAWL_CONCURRENCY ?? 4);
   const crawlConcurrency = Math.min(MAX_CRAWL_CONCURRENCY, Math.max(1, Math.trunc(configuredConcurrency) || 4));
+
+  const getNewAvailableEdges = (): WikiEdge[] => {
+    const newEdges: WikiEdge[] = [];
+    for (const [source, links] of progress.linksByNode) {
+      if (!progress.nodeIds.has(source) || isJunkTitle(source)) continue;
+      for (const link of links) {
+        const target = getCanonicalTitle(link, progress.resolvedTitles);
+        const edgeKey = `${source}|${target}`;
+        if (
+          source === target ||
+          isJunkTitle(target) ||
+          !progress.nodeIds.has(target) ||
+          emittedEdgeKeys.has(edgeKey)
+        ) continue;
+        emittedEdgeKeys.add(edgeKey);
+        newEdges.push({ source, target });
+      }
+    }
+    return newEdges;
+  };
 
   const emitProgress = (complete = false) => {
     const done = progress.nodes.length;
@@ -211,8 +232,6 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
     }
 
-    onBatch?.(progress.nodes.filter((node) => !batchNodeIds.has(node.id)), []);
-
     let continueToken = batchResponse.continueToken;
     while (continueToken && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
       const activeItems = batchResults.filter((item) => item !== null && item.currentDepth < depth && !satisfiedTitles.has(item.title));
@@ -271,6 +290,8 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
       continueToken = paginatedResponse.continueToken;
     }
+
+    onBatch?.(progress.nodes.filter((node) => !batchNodeIds.has(node.id)), getNewAvailableEdges());
   };
 
   while (progress.queue.length > 0 && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
@@ -307,7 +328,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   for (const node of progress.nodes) {
     node.outDegree = edges.filter((edge) => edge.source === node.id).length;
   }
-  onBatch?.([], edges);
+  onBatch?.([], edges.filter((edge) => !emittedEdgeKeys.has(`${edge.source}|${edge.target}`)));
 
   if (progress.queue.length === 0) {
     emitProgress(true);

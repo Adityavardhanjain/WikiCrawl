@@ -157,4 +157,24 @@ describe('offline crawler', () => {
       mock.restore();
     }
   });
+
+  it('emits available edges during crawl batches', async () => {
+    const mock = installMockMediaWiki();
+    const batches: Array<{ nodes: number; edges: number }> = [];
+
+    try {
+      await crawlWikipedia({
+        seedTitle: 'Page 0',
+        depth: 2,
+        maxNodes: 20,
+        onBatch: (nodes, edges) => batches.push({ nodes: nodes.length, edges: edges.length }),
+      });
+
+      const firstEdgeBatch = batches.findIndex((batch) => batch.edges > 0);
+      expect(firstEdgeBatch).toBeGreaterThanOrEqual(0);
+      expect(batches.slice(0, firstEdgeBatch).some((batch) => batch.nodes > 0)).toBe(true);
+    } finally {
+      mock.restore();
+    }
+  });
 });

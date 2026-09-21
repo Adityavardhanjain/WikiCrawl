@@ -23,12 +23,15 @@ export function CrawlControls({
     <div className="flex items-end gap-6">
       <div className="flex-1">
         <div className="flex justify-between items-center mb-2">
-          <label className="text-sm font-medium text-gray-300">
+          <label htmlFor="crawl-depth" className="text-sm font-medium text-atlas-muted">
             Crawl Depth
           </label>
-          <span className="text-sm text-cyan-400 font-medium">{depth} hop{depth !== 1 ? 's' : ''}</span>
+          <span id="crawl-depth-value" className="text-sm text-cyan-400 font-medium">{depth} hop{depth !== 1 ? 's' : ''}</span>
         </div>
         <input
+          id="crawl-depth"
+          aria-label="Crawl depth"
+          aria-valuetext={`${depth} hop${depth !== 1 ? 's' : ''}`}
           type="range"
           min="1"
           max="3"
@@ -38,7 +41,7 @@ export function CrawlControls({
           disabled={disabled}
           className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
         />
-        <div className="flex justify-between text-xs text-gray-500 mt-1">
+        <div className="flex justify-between text-xs text-atlas-dim mt-1">
           <span>1 hop</span>
           <span>2 hops</span>
           <span>3 hops</span>
@@ -47,12 +50,15 @@ export function CrawlControls({
 
       <div className="flex-1">
         <div className="flex justify-between items-center mb-2">
-          <label className="text-sm font-medium text-gray-300">
+          <label htmlFor="max-nodes" className="text-sm font-medium text-atlas-muted">
             Max Nodes
           </label>
-          <span className="text-sm text-cyan-400 font-medium">{maxNodes}</span>
+          <span id="max-nodes-value" className="text-sm text-cyan-400 font-medium">{maxNodes}</span>
         </div>
         <input
+          id="max-nodes"
+          aria-label="Maximum crawled nodes"
+          aria-valuetext={`${maxNodes} maximum nodes`}
           type="range"
           min="50"
           max="500"
@@ -62,7 +68,7 @@ export function CrawlControls({
           disabled={disabled}
           className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
         />
-        <div className="flex justify-between text-xs text-gray-500 mt-1">
+        <div className="flex justify-between text-xs text-atlas-dim mt-1">
           <span>50</span>
           <span>250</span>
           <span>500</span>

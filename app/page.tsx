@@ -183,6 +183,9 @@ export default function Home() {
   const [maxNodes, setMaxNodes] = useState(150);
   const [submittedRequest, setSubmittedRequest] = useState<CrawlRequest | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>('community');
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [reduceEffects, setReduceEffects] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
   const [pathSelection, setPathSelection] = useState<{ from: string; to: string; result: PathResult | null } | null>(null);
@@ -200,6 +203,12 @@ export default function Home() {
   const liveUpdateFrameRef = useRef<number | null>(null);
   const submittedRequestRef = useRef<CrawlRequest | null>(null);
   const requestNonceRef = useRef(0);
+
+  useEffect(() => {
+    const lowPower = typeof navigator !== 'undefined' && (navigator.hardwareConcurrency ?? 8) <= 4;
+    const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setReduceEffects(lowPower || reducedMotion);
+  }, []);
 
   const mergeLiveData = useCallback((request: CrawlRequest, update: (current: CrawlResult) => CrawlResult) => {
     const pendingUpdate = liveUpdateRef.current;
@@ -299,6 +308,13 @@ export default function Home() {
   });
 
   const displayData = data ?? liveData ?? previousDataRef.current;
+  const crawlStatus = error
+    ? `Crawl error: ${error instanceof Error ? error.message : 'unable to load pages'}`
+    : isLoading
+      ? `Crawl in progress: ${displayData?.nodes.length ?? 0} pages found`
+      : data
+        ? `Crawl complete: ${data.nodes.length} pages found`
+        : '';
   const pathfinder = usePathfinder(displayData);
   const selectedNode = displayData?.nodes.find((node) => node.id === selectedNodeId) ?? null;
 
@@ -519,7 +535,7 @@ export default function Home() {
   }, [data]);
 
   return (
-    <div className="app-shell h-screen flex flex-col relative overflow-hidden">
+    <div className={`app-shell h-screen flex flex-col relative overflow-hidden ${reduceEffects ? 'reduce-effects' : ''}`}>
       <AnimatedBackground />
       
       {/* Header */}
@@ -588,11 +604,21 @@ export default function Home() {
           </div>
           
           {/* Search and controls */}
-          <div className="flex gap-6">
+          <div className="flex gap-6 header-search-controls">
             <div className="flex-1">
               <SeedSearch onSearch={handleSearch} isLoading={isLoading} />
             </div>
-            <div className="w-96">
+            <div className="w-96 header-crawl-controls">
+              <button
+                type="button"
+                className="options-toggle atlas-mobile-button"
+                aria-expanded={optionsOpen}
+                aria-controls="crawl-options"
+                onClick={() => setOptionsOpen((open) => !open)}
+              >
+                Options <span aria-hidden="true">{optionsOpen ? '−' : '+'}</span>
+              </button>
+              <div id="crawl-options" className={`crawl-options ${optionsOpen ? 'crawl-options-open' : ''}`}>
               <CrawlControls
                 depth={depth}
                 maxNodes={maxNodes}
@@ -602,8 +628,10 @@ export default function Home() {
                 canGoDeeper={Boolean(submittedRequest && submittedRequest.depth < 3)}
                 disabled={isLoading}
               />
+              </div>
             </div>
           </div>
+          <div className="sr-only" aria-live="polite">{crawlStatus}</div>
         </div>
       </header>
 
@@ -825,7 +853,14 @@ export default function Home() {
         </div>
 
         {/* Sidebar */}
-        {displayData && <MemoizedSidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} />}
+        {displayData && (
+          <>
+            <button type="button" className="mobile-sidebar-toggle atlas-mobile-button" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen((open) => !open)}>
+              {sidebarOpen ? 'Close atlas' : 'Open atlas'}
+            </button>
+            <MemoizedSidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+          </>
+        )}
       </div>
     </div>
   );

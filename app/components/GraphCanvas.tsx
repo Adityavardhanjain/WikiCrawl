@@ -533,14 +533,14 @@ export function GraphCanvas({
       <div className="absolute top-4 right-4 flex gap-1 graph-overlay rounded-lg p-1 z-10">
         <button className="graph-control" onClick={() => sigmaRef.current?.getCamera().animatedZoom({ duration: 180 })} aria-label="Zoom in">+</button>
         <button className="graph-control" onClick={() => sigmaRef.current?.getCamera().animatedUnzoom({ duration: 180 })} aria-label="Zoom out">-</button>
-        <button className="graph-control graph-control-wide" onClick={() => sigmaRef.current?.getCamera().animatedReset({ duration: 220 })}>Fit</button>
-        <button className="graph-control graph-control-wide" onClick={resetLayout}>Reset</button>
+        <button aria-label="Fit graph to view" className="graph-control graph-control-wide" onClick={() => sigmaRef.current?.getCamera().animatedReset({ duration: 220 })}>Fit</button>
+        <button aria-label="Reset graph layout" className="graph-control graph-control-wide" onClick={resetLayout}>Reset</button>
         {denseEdges && (
-          <button className="graph-control graph-control-wide" onClick={() => setShowAllEdges((visible) => !visible)}>
+          <button aria-label={showAllEdges ? 'Show graph hubs' : 'Show all graph edges'} className="graph-control graph-control-wide" onClick={() => setShowAllEdges((visible) => !visible)}>
             {showAllEdges ? 'Hubs' : 'All edges'}
           </button>
         )}
-        <button className="graph-control graph-control-wide" onClick={() => setShowArrows((visible) => !visible)}>
+        <button aria-label={showArrows ? 'Hide edge arrows' : 'Show edge arrows'} className="graph-control graph-control-wide" onClick={() => setShowArrows((visible) => !visible)}>
           {showArrows ? 'Arrows on' : 'Arrows'}
         </button>
       </div>

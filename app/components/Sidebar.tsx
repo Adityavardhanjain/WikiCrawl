@@ -10,9 +10,11 @@ interface SidebarProps {
   onNodeSelect: (nodeId: string) => void;
   onCommunitySelect: (communityId: number) => void;
   focusedNode: string | null;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: SidebarProps) {
+function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, isOpen = false, onClose = () => undefined }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<'pagerank' | 'communities'>('pagerank');
   const selectedNode = data.nodes.find((node) => node.id === focusedNode) ?? null;
   const meaningfulCommunities = data.communities.filter((community) => community.size > 1);
@@ -32,12 +34,13 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: Sidebar
   }, [data.edges, data.nodes, selectedNode]);
 
   return (
-    <aside className="atlas-sidebar w-80 glass-strong border-l border-white/10 flex flex-col overflow-hidden">
+    <aside className={`atlas-sidebar mobile-sheet reduce-effects w-80 glass-strong border-l border-white/10 flex flex-col overflow-hidden ${isOpen ? 'mobile-sheet-open' : ''}`}>
       {/* Header */}
       <div className="px-4 py-4 border-b border-white/10">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-500 p-[2px]">
-            <div className="w-full h-full bg-slate-900 rounded-lg flex items-center justify-center">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+          <div className="atlas-brand-mark w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-500 p-[2px]">
+            <div className="atlas-brand-inner w-full h-full bg-slate-900 rounded-lg flex items-center justify-center">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
               </svg>
@@ -45,21 +48,23 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: Sidebar
           </div>
           <div>
             <h2 className="text-lg font-bold text-white">WikiCrawl</h2>
-            <p className="text-xs text-slate-400">Atlas of Wikipedia knowledge</p>
+            <p className="text-xs text-atlas-muted">Atlas of Wikipedia knowledge</p>
           </div>
+          </div>
+          <button type="button" onClick={onClose} className="mobile-sheet-close atlas-icon-button" aria-label="Close atlas sidebar">×</button>
         </div>
         {selectedNode ? (
           <div className="atlas-context">
             <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-400 mb-2">Current location</p>
             <h3 className="text-lg font-semibold text-white leading-tight">{selectedNode.title}</h3>
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-atlas-muted">
               {connectedPages.length} connections · depth {selectedNode.depth >= 0 ? selectedNode.depth : '?'}
             </p>
           </div>
         ) : (
           <div className="atlas-context">
             <p className="text-sm text-slate-300">Explore the map.</p>
-            <p className="mt-1 text-xs text-slate-500">{data.nodes.length} pages · {data.edges.length} connections</p>
+            <p className="mt-1 text-xs text-atlas-dim">{data.nodes.length} pages · {data.edges.length} connections</p>
           </div>
         )}
       </div>
@@ -67,6 +72,8 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: Sidebar
       {/* Tabs */}
       <div className="flex border-b border-white/10">
         <button
+          type="button"
+          aria-label="Show top pages"
           onClick={() => setActiveTab('pagerank')}
           className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
             activeTab === 'pagerank'
@@ -82,6 +89,8 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: Sidebar
           </span>
         </button>
         <button
+          type="button"
+          aria-label="Show clusters"
           onClick={() => setActiveTab('communities')}
           disabled={meaningfulCommunities.length === 0}
           className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
@@ -118,7 +127,7 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: Sidebar
                     index === 0 ? 'bg-yellow-500/20 text-yellow-400' :
                     index === 1 ? 'bg-slate-400/20 text-slate-300' :
                     index === 2 ? 'bg-orange-600/20 text-orange-400' :
-                    'bg-slate-700/50 text-slate-500'
+                    'bg-slate-700/50 text-atlas-dim'
                   }`}>
                     {index + 1}
                   </span>
@@ -164,7 +173,7 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: Sidebar
                     {community.size}
                   </span>
                 </div>
-                <div className="mt-2 text-[11px] text-slate-500 truncate pl-6">
+                <div className="mt-2 text-[11px] text-atlas-dim truncate pl-6">
                   {community.topPages.slice(0, 3).join(' • ')}
                 </div>
               </button>
@@ -192,14 +201,14 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode }: Sidebar
 
       {/* Footer */}
       <div className="atlas-footer p-4 border-t border-white/10">
-        <p className="text-[11px] text-slate-500 text-center">
+          <p className="text-[11px] text-atlas-dim text-center">
           Crawled {new Date(data.crawledAt).toLocaleDateString()}
         </p>
         <div className="mt-3 flex justify-center gap-3 text-[11px]">
           <a className="text-slate-400 transition-colors hover:text-cyan-300" href="mailto:jainadityavardhan@gmail.com?subject=WikiCrawl%20Feedback">Feedback</a>
           <a className="text-slate-400 transition-colors hover:text-cyan-300" href="https://www.linkedin.com/in/adityavardhan-jain/" target="_blank" rel="noopener noreferrer" aria-label="Adityavardhan Jain on LinkedIn">LinkedIn</a>
         </div>
-        <p className="mt-2 text-center text-[10px] text-slate-600">Created by Adityavardhan Jain</p>
+        <p className="mt-2 text-center text-[10px] text-atlas-dim">Created by Adityavardhan Jain</p>
       </div>
     </aside>
   );

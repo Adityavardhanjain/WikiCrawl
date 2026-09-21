@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Graph from 'graphology';
 import { Sigma } from 'sigma';
 import { EdgeArrowProgram, EdgeLineProgram } from 'sigma/rendering';
-import type { CrawlResult, WikiNode } from '@/types/graph';
+import type { CrawlResult, WikiNode, PathResult } from '@/types/graph';
 import { getCommunityColor, getNodeSize } from '@/lib/graphAnalysis';
 import { syncGraphData, updateGraphColors } from '@/lib/graphSync';
 import { seedInitialPositions } from '@/lib/layoutSeed';
@@ -16,8 +16,9 @@ const HOVER_PREFETCH_DWELL_MS = 300;
 interface GraphCanvasProps {
   data: CrawlResult;
   colorMode: 'community' | 'depth';
-  onNodeClick: (node: WikiNode) => void;
+  onNodeClick: (node: WikiNode, shiftKey?: boolean) => void;
   focusedNode: string | null;
+  path: PathResult | null;
 }
 
 export function GraphCanvas({
@@ -25,6 +26,7 @@ export function GraphCanvas({
   colorMode,
   onNodeClick,
   focusedNode,
+  path,
 }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef(new Graph({ type: 'directed', multi: false }));
@@ -48,6 +50,8 @@ export function GraphCanvas({
   const hubIdsRef = useRef(new Set<string>());
   const showAllEdgesRef = useRef(false);
   const showArrowsRef = useRef(false);
+  const pathNodeIdsRef = useRef(new Set<string>());
+  const pathEdgeKeysRef = useRef(new Set<string>());
   const communityFrameRef = useRef<number | null>(null);
   const updateCommunityLabelsRef = useRef<() => void>(() => undefined);
   const pendingNewNodeIdsRef = useRef<string[]>([]);
@@ -86,10 +90,19 @@ export function GraphCanvas({
       .slice(0, 100)
       .map((node) => node.id),
   ), [data.nodes]);
+  const pathNodeIds = useMemo(() => new Set(path?.path ?? []), [path]);
+  const pathEdgeKeys = useMemo(() => new Set(
+    path?.path.slice(1).map((nodeId, index) => {
+      const previousId = path.path[index];
+      return previousId < nodeId ? `${previousId}|${nodeId}` : `${nodeId}|${previousId}`;
+    }) ?? [],
+  ), [path]);
   const edgeCount = data.edges.length;
   const denseEdges = edgeCount > 5000;
   topRankIdsRef.current = topRankIds;
   hubIdsRef.current = hubIds;
+  pathNodeIdsRef.current = pathNodeIds;
+  pathEdgeKeysRef.current = pathEdgeKeys;
   showAllEdgesRef.current = showAllEdges;
   showArrowsRef.current = showArrows;
 
@@ -131,6 +144,30 @@ export function GraphCanvas({
         const isHoverNeighbor = hoverNeighborsRef.current.has(node);
         const nodeData = graph.getNodeAttributes(node).raw as WikiNode;
         const isTopRanked = topRankIdsRef.current.has(node);
+        const hasPath = pathNodeIdsRef.current.size > 0;
+        const isPathNode = pathNodeIdsRef.current.has(node);
+
+        if (hasPath && !isPathNode) {
+          return {
+            ...nodeAttributes,
+            size: Math.max(4, (Number(nodeAttributes.size) || 8) * 0.62),
+            color: 'rgba(100, 116, 139, 0.18)',
+            label: '',
+            forceLabel: false,
+            zIndex: 1,
+          };
+        }
+
+        if (isPathNode) {
+          return {
+            ...nodeAttributes,
+            size: (Number(nodeAttributes.size) || 8) + 3,
+            color: '#67e8f9',
+            label: nodeData.title,
+            forceLabel: true,
+            zIndex: 12,
+          };
+        }
 
         if (isRoot) {
           return {
@@ -206,6 +243,15 @@ export function GraphCanvas({
         const focusId = focusedNodeRef.current;
         const hoverId = hoveredNodeRef.current;
         const [source, target] = graph.extremities(edge);
+        const pathEdgeKey = source < target ? `${source}|${target}` : `${target}|${source}`;
+        const hasPath = pathNodeIdsRef.current.size > 0;
+        const isPathEdge = pathEdgeKeysRef.current.has(pathEdgeKey);
+        if (hasPath && !isPathEdge) {
+          return { ...edgeAttributes, hidden: false, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(100, 116, 139, 0.08)', size: 0.35 };
+        }
+        if (isPathEdge) {
+          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: '#67e8f9', size: 3 };
+        }
         const isFocusedEdge = focusId === source || focusId === target;
         const isHoveredEdge = hoverId === source || hoverId === target;
         if (
@@ -316,9 +362,9 @@ export function GraphCanvas({
       sigma.getContainer().style.cursor = 'default';
     });
 
-    sigma.on('clickNode', ({ node }) => {
+    sigma.on('clickNode', ({ node, event }) => {
       const nodeData = graph.getNodeAttributes(node).raw as WikiNode;
-      onNodeClickRef.current(nodeData);
+      onNodeClickRef.current(nodeData, 'shiftKey' in event.original && event.original.shiftKey);
     });
 
     const container = sigma.getContainer();
@@ -427,6 +473,40 @@ export function GraphCanvas({
       camera.animate({ x: pos.x, y: pos.y }, { duration: 300 });
     }
   }, [focusedNode]);
+
+  useEffect(() => {
+    if (!sigmaRef.current || !path || path.path.length === 0) return;
+
+    const graph = graphRef.current;
+    const positions = path.path
+      .filter((nodeId) => graph.hasNode(nodeId))
+      .map((nodeId) => graph.getNodeAttributes(nodeId));
+    if (positions.length === 0) return;
+
+    const bounds = positions.reduce((current, position) => ({
+      minX: Math.min(current.minX, Number(position.x)),
+      maxX: Math.max(current.maxX, Number(position.x)),
+      minY: Math.min(current.minY, Number(position.y)),
+      maxY: Math.max(current.maxY, Number(position.y)),
+    }), {
+      minX: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    });
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+    const width = Math.max(bounds.maxX - bounds.minX, 0.08);
+    const height = Math.max(bounds.maxY - bounds.minY, 0.08);
+    const dimensions = sigmaRef.current.getDimensions();
+    const graphDimensions = sigmaRef.current.getGraphDimensions();
+    const viewportAspect = dimensions.width / Math.max(dimensions.height, 1);
+    const fitWidth = Math.max(width, height * viewportAspect);
+    const graphWidth = Math.max(graphDimensions.width, 0.08);
+    const ratio = Math.min(4, Math.max(0.22, (fitWidth / graphWidth) * 1.35));
+
+    sigmaRef.current.getCamera().animate({ x: centerX, y: centerY, ratio }, { duration: 420 });
+  }, [path]);
 
   useEffect(() => {
     sigmaRef.current?.refresh();

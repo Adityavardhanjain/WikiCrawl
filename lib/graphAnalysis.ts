@@ -2,7 +2,7 @@ import Graph from 'graphology';
 import metrics from 'graphology-metrics';
 import louvain from 'graphology-communities-louvain';
 import shortestPath from 'graphology-shortest-path';
-import type { WikiNode, WikiEdge, Community } from '@/types/graph';
+import type { WikiNode, Community, CrawlResult } from '@/types/graph';
 
 const COMMUNITY_COLORS = [
   '#e76f51', '#2a9d8f', '#457b9d', '#f4a261', '#84a59d',
@@ -14,6 +14,48 @@ const COMMUNITY_COLORS = [
 export interface GraphAnalysisResult {
   nodes: WikiNode[];
   communities: Community[];
+}
+
+export function buildUndirectedGraph(source: Graph): Graph {
+  const graph = new Graph({ type: 'undirected', multi: false });
+
+  source.forEachNode((node) => graph.addNode(node));
+  source.forEachEdge((_edge, _attributes, sourceNode, targetNode) => {
+    if (sourceNode !== targetNode) graph.mergeEdge(sourceNode, targetNode);
+  });
+
+  return graph;
+}
+
+export function buildPathGraph(data: CrawlResult | null): Graph {
+  const graph = new Graph({ type: 'undirected', multi: false });
+  if (!data) return graph;
+
+  for (const node of data.nodes) graph.addNode(node.id);
+  for (const edge of data.edges) {
+    if (edge.source !== edge.target && graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
+      graph.mergeEdge(edge.source, edge.target);
+    }
+  }
+
+  return graph;
+}
+
+export function findShortestPath(
+  graph: Graph,
+  from: string,
+  to: string,
+): { path: string[]; length: number } | null {
+  if (!graph.hasNode(from) || !graph.hasNode(to)) return null;
+
+  try {
+    const path = shortestPath.bidirectional(graph, from, to);
+    if (!path) return null;
+
+    return { path, length: path.length - 1 };
+  } catch {
+    return null;
+  }
 }
 
 export function analyzeGraph(graph: Graph, seedId: string): GraphAnalysisResult {
@@ -85,25 +127,7 @@ export function getShortestPath(
   from: string, 
   to: string
 ): { path: string[]; length: number } | null {
-  // Treat as undirected for path finding (users think of "clicking through" in either direction)
-  const undirected = graph.copy();
-  undirected.forEachEdge((edge, attrs, source, target) => {
-    if (!undirected.hasEdge(target, source)) {
-      undirected.addEdge(target, source);
-    }
-  });
-  
-  try {
-    const path = shortestPath.bidirectional(undirected, from, to);
-    if (!path) return null;
-    
-    return {
-      path,
-      length: path.length - 1, // Number of edges
-    };
-  } catch {
-    return null;
-  }
+  return findShortestPath(buildUndirectedGraph(graph), from, to);
 }
 
 export function getCommunityColor(communityId: number, totalCommunities: number): string {

@@ -1,7 +1,7 @@
 'use client';
 
-import { memo, useMemo } from 'react';
-import type { WikiNode, CrawlResult } from '@/types/graph';
+import { memo, useEffect, useMemo, useState } from 'react';
+import type { WikiNode, CrawlResult, PathResult } from '@/types/graph';
 import { buildAdjacency } from '@/lib/adjacency';
 import { useNodeSummary } from './useNodeSummary';
 
@@ -12,6 +12,10 @@ interface NodeDetailPanelProps {
   onExpand: (nodeId: string) => void;
   isExpanding?: boolean;
   isExpanded?: boolean;
+  pathSelection?: { from: string; to: string; result: PathResult | null } | null;
+  onFindPath?: (from: string, to: string) => void;
+  onPathNodeClick?: (nodeId: string) => void;
+  onClearPath?: () => void;
 }
 
 function NodeDetailPanel({
@@ -21,7 +25,14 @@ function NodeDetailPanel({
   onExpand,
   isExpanding = false,
   isExpanded = false,
+  pathSelection = null,
+  onFindPath = () => undefined,
+  onPathNodeClick = () => undefined,
+  onClearPath = () => undefined,
 }: NodeDetailPanelProps) {
+  const [pathPickerOpen, setPathPickerOpen] = useState(false);
+  const [pathQuery, setPathQuery] = useState('');
+  const [highlightedPathOption, setHighlightedPathOption] = useState(0);
   const connectedNodes = useMemo(() => {
     if (!node || !data) return [];
     const nodesById = new Map(data.nodes.map((candidate) => [candidate.id, candidate]));
@@ -31,6 +42,32 @@ function NodeDetailPanel({
   }, [data?.edges, data?.nodes, node?.id]);
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useNodeSummary(node?.id ?? null);
+
+  const pathOptions = useMemo(() => {
+    if (!node || !data) return [];
+    const query = pathQuery.trim().toLocaleLowerCase();
+    return data.nodes
+      .filter((candidate) => candidate.id !== node.id)
+      .filter((candidate) => !query || candidate.title.toLocaleLowerCase().includes(query))
+      .slice(0, 8);
+  }, [data?.nodes, node?.id, pathQuery]);
+
+  useEffect(() => {
+    setPathPickerOpen(false);
+    setPathQuery('');
+    setHighlightedPathOption(0);
+  }, [node?.id]);
+
+  useEffect(() => {
+    setHighlightedPathOption((current) => Math.min(current, Math.max(pathOptions.length - 1, 0)));
+  }, [pathOptions.length]);
+
+  const choosePathTarget = (target: WikiNode) => {
+    if (!node) return;
+    onFindPath(node.id, target.id);
+    setPathPickerOpen(false);
+    setPathQuery('');
+  };
 
   if (!node || !data) return null;
 
@@ -110,6 +147,100 @@ function NodeDetailPanel({
           <MetricCard label="PageRank" value={node.pagerank.toFixed(4)} color="cyan" />
           <MetricCard label="Cluster" value={community?.label?.slice(0, 18) || 'Unclustered'} color="yellow" />
         </div>
+
+        <div className="space-y-2">
+          <button
+            type="button"
+            aria-expanded={pathPickerOpen}
+            aria-controls="path-target-list"
+            onClick={() => setPathPickerOpen((open) => !open)}
+            className="w-full rounded-xl border border-cyan-400/25 bg-cyan-400/10 px-3 py-2.5 text-left text-sm font-medium text-cyan-200 transition hover:bg-cyan-400/20 hover:text-white"
+          >
+            Find path to...
+          </button>
+          {pathPickerOpen && (
+            <div className="relative">
+              <input
+                autoFocus
+                role="combobox"
+                aria-label="Find path to a node"
+                aria-controls="path-target-list"
+                aria-expanded="true"
+                aria-activedescendant={pathOptions[highlightedPathOption] ? `path-target-${pathOptions[highlightedPathOption].id}` : undefined}
+                value={pathQuery}
+                onChange={(event) => {
+                  setPathQuery(event.target.value);
+                  setHighlightedPathOption(0);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setPathPickerOpen(false);
+                  } else if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    setHighlightedPathOption((current) => Math.min(current + 1, pathOptions.length - 1));
+                  } else if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    setHighlightedPathOption((current) => Math.max(current - 1, 0));
+                  } else if (event.key === 'Enter' && pathOptions[highlightedPathOption]) {
+                    event.preventDefault();
+                    choosePathTarget(pathOptions[highlightedPathOption]);
+                  }
+                }}
+                placeholder="Search crawled nodes"
+                className="w-full rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none ring-cyan-400 placeholder:text-slate-500 focus:ring-2"
+              />
+              <div id="path-target-list" role="listbox" className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-950 shadow-xl">
+                {pathOptions.length > 0 ? pathOptions.map((candidate, index) => (
+                  <button
+                    key={candidate.id}
+                    id={`path-target-${candidate.id}`}
+                    type="button"
+                    role="option"
+                    aria-selected={index === highlightedPathOption}
+                    onMouseEnter={() => setHighlightedPathOption(index)}
+                    onClick={() => choosePathTarget(candidate)}
+                    className={`block w-full truncate px-3 py-2 text-left text-xs ${index === highlightedPathOption ? 'bg-cyan-400/15 text-cyan-100' : 'text-slate-300 hover:bg-white/5'}`}
+                  >
+                    {candidate.title}
+                  </button>
+                )) : (
+                  <p className="px-3 py-2 text-xs text-slate-500">No matching crawled nodes</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {pathSelection && (
+          <div className="space-y-3 rounded-xl border border-cyan-400/25 bg-cyan-400/5 p-3" aria-live="polite">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-cyan-200">Shortest path</h4>
+              <button type="button" onClick={onClearPath} className="text-xs text-slate-400 underline hover:text-white">Clear</button>
+            </div>
+            {pathSelection.result ? (
+              <>
+                <p className="text-xs text-slate-400">{pathSelection.result.length} {pathSelection.result.length === 1 ? 'hop' : 'hops'}</p>
+                <ol className="space-y-1">
+                  {pathSelection.result.path.map((nodeId, index) => {
+                    const pathNode = data.nodes.find((candidate) => candidate.id === nodeId);
+                    return (
+                      <li key={nodeId} className="flex items-center gap-2 text-xs">
+                        <span className="w-4 shrink-0 text-right text-slate-500">{index + 1}.</span>
+                        <button type="button" onClick={() => onPathNodeClick(nodeId)} className="truncate text-left text-cyan-200 hover:text-white hover:underline">
+                          {pathNode?.title ?? nodeId}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </>
+            ) : (
+              <p className="text-xs leading-relaxed text-amber-200">
+                No path within the crawled graph. Try Expand on a node or increase depth.
+              </p>
+            )}
+          </div>
+        )}
 
         {connectedNodes.length > 0 && (
           <div>

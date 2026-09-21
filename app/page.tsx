@@ -3,13 +3,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import type { Community, CrawlProgress, CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
+import type { Community, CrawlProgress, CrawlResult, WikiEdge, WikiNode, PathResult } from '@/types/graph';
 import { createCrawlRequest, getCrawlPayload, parseCrawlParams, buildExpandRequestBody, type CrawlRequest } from '@/lib/crawlRequest';
 import { mergeGraphData } from '@/lib/graphSync';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
 import { MemoizedSidebar } from './components/Sidebar';
 import { MemoizedNodeDetailPanel } from './components/NodeDetailPanel';
+import { usePathfinder } from './components/usePathfinder';
 
 // Dynamically import GraphCanvas to avoid SSR issues with WebGL/Sigma
 const GraphCanvas = dynamic(
@@ -184,6 +185,7 @@ export default function Home() {
   const [colorMode, setColorMode] = useState<ColorMode>('community');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
+  const [pathSelection, setPathSelection] = useState<{ from: string; to: string; result: PathResult | null } | null>(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
   const previousDataRef = useRef<CrawlResult | null>(null);
@@ -297,7 +299,22 @@ export default function Home() {
   });
 
   const displayData = data ?? liveData ?? previousDataRef.current;
+  const pathfinder = usePathfinder(displayData);
   const selectedNode = displayData?.nodes.find((node) => node.id === selectedNodeId) ?? null;
+
+  useEffect(() => {
+    if (!pathSelection || !displayData) return;
+    const nodeIds = new Set(displayData.nodes.map((node) => node.id));
+    if (!nodeIds.has(pathSelection.from) || !nodeIds.has(pathSelection.to)) setPathSelection(null);
+  }, [displayData, pathSelection]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPathSelection(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!displayData) return;
@@ -388,6 +405,7 @@ export default function Home() {
     setNotFound(null);
     setSelectedNodeId(null);
     setFocusedNode(null);
+    setPathSelection(null);
     setExplorationHistory([]);
     setExpandedNodeIds(new Set());
     setExpandingNodeId(null);
@@ -415,11 +433,33 @@ export default function Home() {
   }, [data, liveData, submittedRequest]);
 
   // Handle node click
-  const handleNodeClick = useCallback((node: WikiNode) => {
+  const handleNodeClick = useCallback((node: WikiNode, shiftKey = false) => {
+    if (shiftKey && selectedNodeId && selectedNodeId !== node.id) {
+      setPathSelection({
+        from: selectedNodeId,
+        to: node.id,
+        result: pathfinder.findPath(selectedNodeId, node.id),
+      });
+      setFocusedNode(null);
+      return;
+    }
+
     setSelectedNodeId(node.id);
     setFocusedNode(node.id);
+    setPathSelection(null);
     setGraphError(null);
     setCrawlWarning(null);
+  }, [pathfinder, selectedNodeId]);
+
+  const handleFindPath = useCallback((from: string, to: string) => {
+    setSelectedNodeId(from);
+    setPathSelection({ from, to, result: pathfinder.findPath(from, to) });
+    setFocusedNode(null);
+  }, [pathfinder]);
+
+  const handlePathNodeClick = useCallback((nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    setFocusedNode(null);
   }, []);
 
   // Handle node selection from sidebar
@@ -452,6 +492,7 @@ export default function Home() {
   const handleCloseSelection = useCallback(() => {
     setSelectedNodeId(null);
     setFocusedNode(null);
+    setPathSelection(null);
   }, []);
 
   // Load from URL params
@@ -677,6 +718,7 @@ export default function Home() {
                 colorMode={colorMode}
                 onNodeClick={handleNodeClick}
                 focusedNode={focusedNode}
+                path={pathSelection?.result ?? null}
               />
               
               <MemoizedNodeDetailPanel
@@ -686,6 +728,10 @@ export default function Home() {
                 onExpand={handleExpand}
                 isExpanding={Boolean(selectedNode) && expandingNodeId === selectedNode?.id}
                 isExpanded={Boolean(selectedNode) && expandedNodeIds.has(selectedNode?.id ?? '')}
+                pathSelection={pathSelection}
+                onFindPath={handleFindPath}
+                onPathNodeClick={handlePathNodeClick}
+                onClearPath={() => setPathSelection(null)}
               />
 
             </>

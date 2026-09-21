@@ -177,4 +177,44 @@ describe('offline crawler', () => {
       mock.restore();
     }
   });
+
+  it('expand: never re-fetches known pages, offsets new node depth by baseDepth, and edges to known nodes', async () => {
+    const mock = installMockMediaWiki({ mode: 'topical' });
+    const requestedTitles: string[] = [];
+    const wrappedFetch = globalThis.fetch;
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.searchParams.get('action') === 'query' && url.searchParams.get('prop') === 'links') {
+        requestedTitles.push(...(url.searchParams.get('titles') || '').split('|').filter(Boolean));
+      }
+      return wrappedFetch(input, init);
+    }) as typeof fetch;
+
+    try {
+      const knownIds = ['Page 0', 'Page 3', 'Page 4'];
+      const result = await crawlWikipedia({
+        seedTitle: 'Page 0',
+        depth: 1,
+        maxNodes: 5,
+        knownIds,
+        baseDepth: 2,
+      });
+
+      // The expanded node itself is already known and should not reappear in the delta.
+      expect(result.nodes.some((node) => node.id === 'Page 0')).toBe(false);
+      // New nodes are offset by baseDepth (currentDepth 0 relative to the seed -> baseDepth + 1).
+      expect(result.nodes.length).toBeGreaterThan(0);
+      expect(result.nodes.every((node) => node.depth === 3)).toBe(true);
+      // Edges to nodes already known (but not the seed) are still produced.
+      expect(result.edges).toContainEqual({ source: 'Page 0', target: 'Page 3' });
+      expect(result.edges).toContainEqual({ source: 'Page 0', target: 'Page 4' });
+      // Known pages other than the seed are never requested.
+      expect(requestedTitles).not.toContain('Page 3');
+      expect(requestedTitles).not.toContain('Page 4');
+      expect(requestedTitles).toContain('Page 0');
+    } finally {
+      globalThis.fetch = wrappedFetch;
+      mock.restore();
+    }
+  });
 });

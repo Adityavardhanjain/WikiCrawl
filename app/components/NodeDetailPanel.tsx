@@ -3,6 +3,7 @@
 import { memo, useMemo } from 'react';
 import type { WikiNode, CrawlResult } from '@/types/graph';
 import { buildAdjacency } from '@/lib/adjacency';
+import { useNodeSummary } from './useNodeSummary';
 
 interface NodeDetailPanelProps {
   node: WikiNode | null;
@@ -10,6 +11,7 @@ interface NodeDetailPanelProps {
   onClose: () => void;
   onExpand: (nodeId: string) => void;
   isExpanding?: boolean;
+  isExpanded?: boolean;
 }
 
 function NodeDetailPanel({
@@ -18,6 +20,7 @@ function NodeDetailPanel({
   onClose,
   onExpand,
   isExpanding = false,
+  isExpanded = false,
 }: NodeDetailPanelProps) {
   const connectedNodes = useMemo(() => {
     if (!node || !data) return [];
@@ -26,6 +29,8 @@ function NodeDetailPanel({
       .map((connectedId) => nodesById.get(connectedId))
       .filter((connectedNode): connectedNode is WikiNode => Boolean(connectedNode));
   }, [data?.edges, data?.nodes, node?.id]);
+
+  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useNodeSummary(node?.id ?? null);
 
   if (!node || !data) return null;
 
@@ -59,15 +64,40 @@ function NodeDetailPanel({
 
       {/* Content */}
       <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
-        {/* Extract */}
-        {node.extract ? (
-          <p className="text-sm text-slate-300 leading-relaxed">
-            {node.extract}
-          </p>
+        {/* Summary: thumbnail, description, extract */}
+        {(summaryLoading || summary?.thumbnail) && (
+          <div data-testid="node-summary-thumbnail" className="relative w-full aspect-[16/9] overflow-hidden rounded-xl bg-slate-800/60">
+            {summary?.thumbnail ? (
+              <img
+                src={summary.thumbnail.source}
+                alt=""
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div data-testid="node-summary-thumbnail-skeleton" className="h-full w-full animate-pulse bg-slate-700/40" />
+            )}
+          </div>
+        )}
+
+        {summaryLoading ? (
+          <div data-testid="node-summary-skeleton" className="space-y-2">
+            <div className="h-3 w-1/2 animate-pulse rounded bg-slate-700/40" />
+            <div className="h-3 w-full animate-pulse rounded bg-slate-700/40" />
+            <div className="h-3 w-full animate-pulse rounded bg-slate-700/40" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-slate-700/40" />
+          </div>
+        ) : summaryError ? (
+          <p data-testid="node-summary-error" className="text-sm text-amber-400/90 italic">Couldn&apos;t load a preview for this page.</p>
         ) : (
-          <p className="text-sm text-slate-500 italic">
-            No preview available. Click to load more details.
-          </p>
+          <>
+            {summary?.description && (
+              <p className="text-xs uppercase tracking-wide text-cyan-400/80">{summary.description}</p>
+            )}
+            <p data-testid="node-summary-extract" className="text-sm text-slate-300 leading-relaxed">
+              {summary?.extract || 'No preview available for this page.'}
+            </p>
+          </>
         )}
 
         <div className="flex items-center gap-3 border-y border-white/10 py-3 text-xs text-slate-400">
@@ -137,13 +167,20 @@ function NodeDetailPanel({
           </a>
           <button
             onClick={() => onExpand(node.id)}
-            disabled={isExpanding}
-            className="flex-1 btn-primary px-3 py-2.5 text-white text-sm rounded-xl transition-all flex items-center justify-center gap-2"
+            disabled={isExpanding || isExpanded}
+            className="flex-1 btn-primary px-3 py-2.5 text-white text-sm rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {isExpanding ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 <span>Diving...</span>
+              </>
+            ) : isExpanded ? (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Expanded</span>
               </>
             ) : (
               <>

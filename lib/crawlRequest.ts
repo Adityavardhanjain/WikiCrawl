@@ -1,3 +1,5 @@
+import type { CrawlResult } from '@/types/graph';
+
 export interface CrawlRequest {
   seed: string;
   depth: number;
@@ -33,5 +35,43 @@ export function getCrawlPayload(request: CrawlRequest): { seedTitle: string; dep
     seedTitle: request.seed,
     depth: request.depth,
     maxNodes: request.maxNodes,
+  };
+}
+
+export interface ExpandRequestBody {
+  seedTitle: string;
+  depth: number;
+  maxNodes: number;
+  knownNodeIds: string[];
+  knownEdgeIndexPairs: [number, number][];
+  baseDepth: number;
+}
+
+/** Builds the (small) expand request body: node ids once, edges as index pairs into them. */
+export function buildExpandRequestBody(
+  nodeId: string,
+  data: CrawlResult,
+  depth: number,
+  maxNodes: number,
+): ExpandRequestBody {
+  const knownNodeIds = data.nodes.map((node) => node.id);
+  const indexById = new Map(knownNodeIds.map((id, index) => [id, index]));
+  const knownEdgeIndexPairs: [number, number][] = [];
+  for (const edge of data.edges) {
+    const sourceIndex = indexById.get(edge.source);
+    const targetIndex = indexById.get(edge.target);
+    if (sourceIndex !== undefined && targetIndex !== undefined) {
+      knownEdgeIndexPairs.push([sourceIndex, targetIndex]);
+    }
+  }
+
+  const expandedNode = data.nodes.find((node) => node.id === nodeId);
+  return {
+    seedTitle: nodeId,
+    depth: Math.min(depth, 2),
+    maxNodes: Math.floor(maxNodes / 2),
+    knownNodeIds,
+    knownEdgeIndexPairs,
+    baseDepth: expandedNode?.depth ?? 0,
   };
 }

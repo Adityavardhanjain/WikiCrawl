@@ -9,6 +9,9 @@ import { getCommunityColor, getNodeSize } from '@/lib/graphAnalysis';
 import { syncGraphData, updateGraphColors } from '@/lib/graphSync';
 import { seedInitialPositions } from '@/lib/layoutSeed';
 import { getRememberedPositions, useForceLayout } from './useForceLayout';
+import { useNodeSummary, usePrefetchNodeSummary } from './useNodeSummary';
+
+const HOVER_PREFETCH_DWELL_MS = 300;
 
 interface GraphCanvasProps {
   data: CrawlResult;
@@ -29,6 +32,10 @@ export function GraphCanvas({
   const onNodeClickRef = useRef(onNodeClick);
   const dataRef = useRef(data);
   const [hoveredNode, setHoveredNode] = useState<WikiNode | null>(null);
+  const hoveredSummary = useNodeSummary(hoveredNode?.id ?? null, { enabled: false });
+  const prefetchSummary = usePrefetchNodeSummary();
+  const prefetchSummaryRef = useRef(prefetchSummary);
+  const hoverDwellTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const tooltipPositionRef = useRef({ x: 0, y: 0 });
   const tooltipFrameRef = useRef<number | null>(null);
@@ -59,6 +66,7 @@ export function GraphCanvas({
 
   dataRef.current = data;
   colorModeRef.current = colorMode;
+  prefetchSummaryRef.current = prefetchSummary;
 
   const maxDepth = useMemo(() => {
     const depths = data.nodes.map((n) => n.depth).filter((d) => d >= 0);
@@ -288,9 +296,18 @@ export function GraphCanvas({
       setHoveredNode(nodeData);
       sigma.refresh();
       sigma.getContainer().style.cursor = 'pointer';
+
+      if (hoverDwellTimeoutRef.current) clearTimeout(hoverDwellTimeoutRef.current);
+      hoverDwellTimeoutRef.current = setTimeout(() => {
+        prefetchSummaryRef.current(nodeData.id);
+      }, HOVER_PREFETCH_DWELL_MS);
     });
 
     sigma.on('leaveNode', () => {
+      if (hoverDwellTimeoutRef.current) {
+        clearTimeout(hoverDwellTimeoutRef.current);
+        hoverDwellTimeoutRef.current = null;
+      }
       if (hoveredNodeRef.current === null) return;
       hoveredNodeRef.current = null;
       hoverNeighborsRef.current = new Set();
@@ -325,6 +342,7 @@ export function GraphCanvas({
     return () => {
       container.removeEventListener('mousemove', handleMouseMove);
       if (tooltipFrameRef.current !== null) window.cancelAnimationFrame(tooltipFrameRef.current);
+      if (hoverDwellTimeoutRef.current) clearTimeout(hoverDwellTimeoutRef.current);
       sigma.getCamera().removeListener('updated', updateCommunityLabels);
       graph.removeListener('eachNodeAttributesUpdated', updateCommunityLabels);
       if (communityFrameRef.current !== null) window.cancelAnimationFrame(communityFrameRef.current);
@@ -543,10 +561,10 @@ export function GraphCanvas({
           }}
         >
           <h4>{hoveredNode.title}</h4>
-          {hoveredNode.extract ? (
-            <p>{hoveredNode.extract.slice(0, 200)}...</p>
+          {hoveredSummary.data?.extract ? (
+            <p>{hoveredSummary.data.extract.slice(0, 200)}...</p>
           ) : (
-            <p className="text-gray-400 italic">Click for more info</p>
+            <p className="text-gray-400 italic">Click for details</p>
           )}
           <div className="mt-2 pt-2 border-t border-gray-700 flex gap-4 text-xs">
             <span>Depth: {hoveredNode.depth >= 0 ? hoveredNode.depth : '?'}</span>

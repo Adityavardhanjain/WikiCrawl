@@ -9,7 +9,6 @@ function node(id: string, communityId: number): WikiNode {
     id,
     title: id,
     url: id,
-    extract: '',
     depth: communityId,
     inDegree: 0,
     outDegree: 0,

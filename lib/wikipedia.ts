@@ -33,7 +33,6 @@ interface WikipediaPage {
   title: string;
   missing?: boolean;
   links?: WikipediaLink[];
-  extract?: string;
 }
 
 interface WikipediaResponse {
@@ -100,23 +99,6 @@ export async function searchWikipedia(query: string): Promise<WikipediaSearchRes
   // opensearch returns [query, titles, descriptions, urls]
   const titles = data[1] ?? [];
   return titles.map((title) => ({ title }));
-}
-
-export async function getPageExtract(title: string): Promise<string | null> {
-  const data = await fetchWikipedia({
-    action: 'query',
-    formatversion: '2',
-    titles: title,
-    prop: 'extracts',
-    exintro: '1',
-    explaintext: '1',
-    exsentences: '3',
-  });
-
-  const page = data.query?.pages?.[0];
-  if (!page || page.missing) return null;
-
-  return page.extract || null;
 }
 
 export interface PageLinksResult {

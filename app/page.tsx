@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import type { Community, CrawlProgress, CrawlResult, WikiEdge, WikiNode } from '@/types/graph';
-import { createCrawlRequest, getCrawlPayload, parseCrawlParams, type CrawlRequest } from '@/lib/crawlRequest';
+import { createCrawlRequest, getCrawlPayload, parseCrawlParams, buildExpandRequestBody, type CrawlRequest } from '@/lib/crawlRequest';
 import { mergeGraphData } from '@/lib/graphSync';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
@@ -107,7 +107,6 @@ async function readCrawlResponse(
     onNodes?: (nodes: WikiNode[]) => void;
     onEdges?: (edges: WikiEdge[]) => void;
     onAnalysis?: (metrics: Record<string, Partial<WikiNode>>, communities: Community[]) => void;
-    onExtracts?: (extracts: { nodeId: string; extract: string | null }[]) => void;
     onWarning?: (failedTitles: string[]) => void;
   }
 ): Promise<CrawlResult> {
@@ -153,7 +152,6 @@ async function readCrawlResponse(
       if (event === 'nodes') handlers?.onNodes?.(payload.nodes ?? []);
       if (event === 'edges') handlers?.onEdges?.(payload.edges ?? []);
       if (event === 'analysis') handlers?.onAnalysis?.(payload.metrics ?? {}, payload.communities ?? []);
-      if (event === 'extracts') handlers?.onExtracts?.(payload.extracts ?? []);
       if (event === 'warning') handlers?.onWarning?.(payload.failedTitles ?? []);
       if (payload?.result) {
         finalResult = payload.result as CrawlResult;
@@ -193,6 +191,9 @@ export default function Home() {
   const [crawlWarning, setCrawlWarning] = useState<number | null>(null);
   const [notFound, setNotFound] = useState<{ title: string; suggestions: string[] } | null>(null);
   const [explorationHistory, setExplorationHistory] = useState<Array<{ id: string; title: string }>>([]);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
+  const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null);
+  const [expandNotice, setExpandNotice] = useState<string | null>(null);
   const liveUpdateRef = useRef<((current: CrawlResult) => CrawlResult) | null>(null);
   const liveUpdateFrameRef = useRef<number | null>(null);
   const submittedRequestRef = useRef<CrawlRequest | null>(null);
@@ -272,16 +273,6 @@ export default function Home() {
             nodes: current.nodes.map((node) => ({ ...node, ...(metrics[node.id] ?? {}) })),
             communities,
           })),
-          onExtracts: (extracts) => mergeLiveData(request, (current) => ({
-            ...current,
-            nodes: (() => {
-              const extractByNodeId = new Map(extracts.map((item) => [item.nodeId, item.extract]));
-              return current.nodes.map((node) => {
-                const extract = extractByNodeId.get(node.id);
-                return extract ? { ...node, extract } : node;
-              });
-            })(),
-          })),
           onWarning: (failedTitles) => setCrawlWarning(failedTitles.length),
         });
         const issues = validateGraphData(result);
@@ -344,33 +335,33 @@ export default function Home() {
   // Expand mutation
   const expandMutation = useMutation({
     mutationFn: async (nodeId: string) => {
+      if (!displayData) throw new Error('No graph data available to expand.');
       const response = await fetch('/api/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          seedTitle: nodeId, 
-          depth: Math.min(depth, 2), // Limit expansion depth
-          maxNodes: Math.floor(maxNodes / 2), 
-          baseGraph: displayData ?? undefined,
-        }),
+        body: JSON.stringify(buildExpandRequestBody(nodeId, displayData, depth, maxNodes)),
       });
-      
+
       const result = await readCrawlResponse(response);
-      const issues = validateGraphData(result);
-      if (issues.length > 0) throw new Error(issues[0]);
-      return result;
+      if (!Array.isArray(result.nodes) || !Array.isArray(result.edges)) {
+        throw new Error('Received an invalid response while expanding this page.');
+      }
+      return { nodeId, result };
     },
-    onSuccess: (newData) => {
-      if (displayData) {
-        if (submittedRequest) {
-          const queryKey = ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce];
-          const currentData = queryClient.getQueryData<CrawlResult>(queryKey) ?? displayData;
-          queryClient.setQueryData(queryKey, mergeGraphData(currentData, newData));
-        }
+    onSuccess: ({ nodeId, result }) => {
+      setExpandedNodeIds((current) => new Set(current).add(nodeId));
+      setExpandNotice(result.nodes.length === 0 ? `No new pages found from "${nodeId}".` : null);
+      if (displayData && submittedRequest) {
+        const queryKey = ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce];
+        const currentData = queryClient.getQueryData<CrawlResult>(queryKey) ?? displayData;
+        queryClient.setQueryData(queryKey, mergeGraphData(currentData, result));
       }
     },
     onError: (error) => {
       setGraphError(error instanceof Error ? error.message : 'Could not explore this page.');
+    },
+    onSettled: () => {
+      setExpandingNodeId(null);
     },
   });
 
@@ -398,6 +389,9 @@ export default function Home() {
     setSelectedNodeId(null);
     setFocusedNode(null);
     setExplorationHistory([]);
+    setExpandedNodeIds(new Set());
+    setExpandingNodeId(null);
+    setExpandNotice(null);
   }, [data, depth, liveData, maxNodes]);
 
   const handleGoDeeper = useCallback(() => {
@@ -448,9 +442,12 @@ export default function Home() {
 
   // Handle expand from node
   const handleExpand = useCallback((nodeId: string) => {
+    if (expandedNodeIds.has(nodeId) || expandingNodeId) return;
     setGraphError(null);
+    setExpandNotice(null);
+    setExpandingNodeId(nodeId);
     expandMutation.mutate(nodeId);
-  }, [expandMutation]);
+  }, [expandMutation, expandedNodeIds, expandingNodeId]);
 
   const handleCloseSelection = useCallback(() => {
     setSelectedNodeId(null);
@@ -687,7 +684,8 @@ export default function Home() {
                 data={displayData}
                 onClose={handleCloseSelection}
                 onExpand={handleExpand}
-                isExpanding={expandMutation.isPending}
+                isExpanding={Boolean(selectedNode) && expandingNodeId === selectedNode?.id}
+                isExpanded={Boolean(selectedNode) && expandedNodeIds.has(selectedNode?.id ?? '')}
               />
 
             </>
@@ -699,6 +697,17 @@ export default function Home() {
                 <span>{graphError}</span>
                 <button type="button" onClick={() => refetch()} className="shrink-0 text-xs font-semibold uppercase tracking-wide text-cyan-300 hover:text-white">
                   Retry
+                </button>
+              </div>
+            </div>
+          )}
+
+          {expandNotice && displayData && (
+            <div className="absolute inset-x-0 bottom-6 z-30 flex justify-center px-4">
+              <div className="flex max-w-lg items-center gap-4 rounded-2xl border border-cyan-500/30 bg-slate-950/85 px-4 py-3 text-sm text-cyan-200 shadow-xl backdrop-blur-md">
+                <span>{expandNotice}</span>
+                <button type="button" aria-label="Dismiss notice" onClick={() => setExpandNotice(null)} className="shrink-0 text-lg leading-none text-slate-400 hover:text-white">
+                  ×
                 </button>
               </div>
             </div>

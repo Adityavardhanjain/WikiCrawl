@@ -27,19 +27,20 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const cacheKey = query.trim().toLowerCase();
+    const trimmedQuery = query.trim();
+    const cacheKey = trimmedQuery.toLowerCase();
     const cached = searchCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       setSearchCache(cacheKey, cached);
       return NextResponse.json(cached.results, {
-        headers: { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=60' },
+        headers: { 'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=604800' },
       });
     }
     searchCache.delete(cacheKey);
 
     let search = pendingSearches.get(cacheKey);
     if (!search) {
-      search = searchWikipedia(cacheKey);
+      search = searchWikipedia(trimmedQuery);
       if (pendingSearches.size < MAX_PENDING_SEARCHES) {
         pendingSearches.set(cacheKey, search);
       }
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
     const results = await search;
     setSearchCache(cacheKey, { expiresAt: Date.now() + SEARCH_CACHE_TTL, results });
     return NextResponse.json(results, {
-      headers: { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=60' },
+      headers: { 'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=604800' },
     });
   } catch (error) {
     console.error('Search error:', error);

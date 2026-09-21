@@ -8,7 +8,6 @@ function node(id: string, depth = 1): WikiNode {
     id,
     title: id,
     url: `https://example.test/${id}`,
-    extract: '',
     depth,
     inDegree: 0,
     outDegree: 0,

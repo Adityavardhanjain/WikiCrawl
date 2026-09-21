@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { crawlWikipedia, buildGraph, sanitizeGraphData } from '@/lib/crawler';
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { getCachedResult, setCachedResult, generateCacheKey } from '@/lib/db';
-import { getPageExtract, getPageLinks, searchWikipedia } from '@/lib/wikipedia';
+import { getPageLinks, searchWikipedia } from '@/lib/wikipedia';
 import { nanoid } from 'nanoid';
-import type { CrawlProgress, CrawlResult, CrawlRequest } from '@/types/graph';
+import type { CrawlProgress, CrawlResult, CrawlRequest, WikiNode, WikiEdge } from '@/types/graph';
 
 const encoder = new TextEncoder();
 
@@ -17,7 +17,7 @@ function sendStreamEvent(controller: ReadableStreamDefaultController, event: str
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as CrawlRequest;
-    const { seedTitle, depth, maxNodes, baseGraph } = body;
+    const { seedTitle, depth, maxNodes, knownNodeIds, knownEdgeIndexPairs, baseDepth } = body;
 
     if (!seedTitle || typeof seedTitle !== 'string') {
       return NextResponse.json(
@@ -25,6 +25,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const isExpand = Array.isArray(knownNodeIds);
+    const knownIds = knownNodeIds ?? [];
+    const validatedBaseDepth = Math.min(Math.max(Math.trunc(baseDepth || 0), 0), 3);
 
     const validatedDepth = Math.min(Math.max(depth || 2, 1), 3);
     const validatedMaxNodes = Math.min(Math.max(maxNodes || 150, 50), 500);
@@ -41,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     const cacheKey = generateCacheKey(seedTitle, validatedDepth, validatedMaxNodes);
-    const cachedResult = baseGraph ? null : getCachedResult(cacheKey);
+    const cachedResult = isExpand ? null : getCachedResult(cacheKey);
 
     if (cachedResult) {
       return NextResponse.json(cachedResult);
@@ -55,6 +59,8 @@ export async function POST(request: NextRequest) {
             seedTitle,
             depth: validatedDepth,
             maxNodes: validatedMaxNodes,
+            knownIds,
+            baseDepth: validatedBaseDepth,
             onProgress: (progress) => {
               crawlProgress = progress;
               sendStreamEvent(controller, 'progress', { progress: crawlProgress });
@@ -69,86 +75,65 @@ export async function POST(request: NextRequest) {
             sendStreamEvent(controller, 'warning', { failedTitles });
           }
 
-          const nodeMap = new Map<string, CrawlResult['nodes'][number]>();
-          for (const node of baseGraph?.nodes ?? []) {
-            nodeMap.set(node.id, node);
-          }
-          for (const node of crawledNodes) {
-            if (!nodeMap.has(node.id)) {
-              nodeMap.set(node.id, node);
-            }
-          }
+          const { nodes: deltaNodes, edges: deltaEdges } = sanitizeGraphData(crawledNodes, crawledEdges);
+          const deltaNodeIds = new Set(deltaNodes.map((node) => node.id));
 
-          const edgeKeys = new Set<string>();
-          const mergedEdges = [...(baseGraph?.edges ?? []), ...crawledEdges].filter((edge) => {
-            const key = `${edge.source}|${edge.target}`;
-            if (edgeKeys.has(key)) return false;
-            edgeKeys.add(key);
-            return true;
-          });
-          const nodes = Array.from(nodeMap.values());
-          const { nodes: validNodes, edges: validEdges } = sanitizeGraphData(nodes, mergedEdges);
-          const graph = buildGraph(validNodes, validEdges);
+          // Reconstruct the caller's known edges (decoded from index pairs) so pagerank/betweenness/
+          // communities are computed for the whole merged graph, without the client resending it.
+          const knownEdges: WikiEdge[] = isExpand
+            ? (knownEdgeIndexPairs ?? [])
+                .filter(([sourceIndex, targetIndex]) => knownIds[sourceIndex] !== undefined && knownIds[targetIndex] !== undefined)
+                .map(([sourceIndex, targetIndex]) => ({ source: knownIds[sourceIndex], target: knownIds[targetIndex] }))
+            : [];
 
-          for (const [nodeId, position] of Object.entries(baseGraph?.positions ?? {})) {
-            if (graph.hasNode(nodeId)) {
-              graph.setNodeAttribute(nodeId, 'x', position.x);
-              graph.setNodeAttribute(nodeId, 'y', position.y);
-            }
-          }
+          const analysisNodeSource: WikiNode[] = isExpand
+            ? [
+                ...knownIds.map((id): WikiNode => ({
+                  id, title: id, url: '', depth: 0,
+                  inDegree: 0, outDegree: 0, pagerank: 0, betweenness: 0, communityId: 0,
+                })),
+                ...deltaNodes,
+              ]
+            : deltaNodes;
+          const analysisEdgeSource = isExpand ? [...knownEdges, ...deltaEdges] : deltaEdges;
 
-          const seedId = baseGraph?.seedId ?? crawledSeedId;
+          const { nodes: validAnalysisNodes, edges: validAnalysisEdges } = sanitizeGraphData(analysisNodeSource, analysisEdgeSource);
+          const graph = buildGraph(validAnalysisNodes, validAnalysisEdges);
+
+          const seedId = crawledSeedId;
           const { nodes: analyzedNodes, communities } = analyzeGraph(graph, seedId);
 
-          const metrics = Object.fromEntries(analyzedNodes.map((node) => [node.id, {
+          const allMetrics = Object.fromEntries(analyzedNodes.map((node) => [node.id, {
             pagerank: node.pagerank,
             betweenness: node.betweenness,
             communityId: node.communityId,
             inDegree: node.inDegree,
             outDegree: node.outDegree,
           }]));
-          sendStreamEvent(controller, 'analysis', { metrics, communities });
+          sendStreamEvent(controller, 'analysis', { metrics: allMetrics, communities });
 
-          const topNodes = analyzedNodes
-            .sort((a, b) => b.pagerank - a.pagerank)
-            .slice(0, 20);
-
-          const extracts = await Promise.all(
-            topNodes.map(async (node) => {
-              try {
-                const extract = await getPageExtract(node.title);
-                return { nodeId: node.id, extract: extract ? extract.slice(0, 300) : null };
-              } catch {
-                return { nodeId: node.id, extract: null };
-              }
-            })
-          );
-
-          for (const { nodeId, extract } of extracts) {
-            const node = analyzedNodes.find((candidate) => candidate.id === nodeId);
-            if (node && extract) {
-              node.extract = extract;
-            }
-          }
-
-          sendStreamEvent(controller, 'extracts', { extracts });
-
-          const positions = baseGraph?.positions ?? {};
+          // Expand responses are deltas: only new nodes/edges, plus updated metrics for known nodes.
+          const resultNodes = isExpand ? analyzedNodes.filter((node) => deltaNodeIds.has(node.id)) : analyzedNodes;
+          const resultEdges = isExpand ? deltaEdges : validAnalysisEdges;
+          const resultMetrics = isExpand
+            ? Object.fromEntries(Object.entries(allMetrics).filter(([id]) => !deltaNodeIds.has(id)))
+            : undefined;
 
           const result: CrawlResult = {
             id: nanoid(),
             seedId,
-            nodes: analyzedNodes,
-            edges: validEdges,
+            nodes: resultNodes,
+            edges: resultEdges,
             communities,
             crawledAt: new Date().toISOString(),
-            positions,
+            positions: {},
             progress: { done: 1, target: 1 },
             partial,
             failedTitles,
+            metrics: resultMetrics,
           };
 
-          if (!baseGraph && !partial) {
+          if (!isExpand && !partial) {
             setCachedResult(cacheKey, seedTitle, validatedDepth, validatedMaxNodes, result);
           }
           sendStreamEvent(controller, 'done', { result });

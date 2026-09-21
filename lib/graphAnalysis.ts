@@ -68,7 +68,6 @@ export function analyzeGraph(graph: Graph, seedId: string): GraphAnalysisResult 
       id: nodeId,
       title: nodeData.title || nodeId,
       url: nodeData.url || '',
-      extract: nodeData.extract || '',
       depth: nodeData.depth ?? 0,
       inDegree: graph.inDegree(nodeId),
       outDegree: graph.outDegree(nodeId),

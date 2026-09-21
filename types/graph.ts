@@ -2,7 +2,6 @@ export interface WikiNode {
   id: string;
   title: string;
   url: string;
-  extract: string;
   depth: number;
   inDegree: number;
   outDegree: number;
@@ -28,6 +27,14 @@ export interface CrawlProgress {
   target: number;
 }
 
+export interface NodeMetrics {
+  pagerank: number;
+  betweenness: number;
+  communityId: number;
+  inDegree: number;
+  outDegree: number;
+}
+
 export interface CrawlResult {
   id: string;
   seedId: string;
@@ -39,6 +46,8 @@ export interface CrawlResult {
   progress?: CrawlProgress;
   partial?: boolean;
   failedTitles?: string[];
+  /** Updated metrics for nodes not included in `nodes` (used by expand deltas). */
+  metrics?: { [nodeId: string]: NodeMetrics };
 }
 
 export interface SearchResult {
@@ -56,5 +65,10 @@ export interface CrawlRequest {
   seedTitle: string;
   depth: number;
   maxNodes: number;
-  baseGraph?: CrawlResult;
+  /** IDs of nodes already present in the client's graph; present only for expand requests. */
+  knownNodeIds?: string[];
+  /** Known edges as index pairs into `knownNodeIds`, used to recompute analysis without resending edges. */
+  knownEdgeIndexPairs?: [number, number][];
+  /** Depth of the node being expanded within the original graph. */
+  baseDepth?: number;
 }

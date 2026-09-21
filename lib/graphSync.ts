@@ -4,6 +4,12 @@ import { positionNearNeighbors } from './layoutSeed';
 
 export function mergeGraphData(base: CrawlResult, update: CrawlResult): CrawlResult {
   const nodes = new Map(base.nodes.map((node) => [node.id, node]));
+  if (update.metrics) {
+    for (const [nodeId, nodeMetrics] of Object.entries(update.metrics)) {
+      const existing = nodes.get(nodeId);
+      if (existing) nodes.set(nodeId, { ...existing, ...nodeMetrics });
+    }
+  }
   for (const node of update.nodes) {
     nodes.set(node.id, { ...nodes.get(node.id), ...node });
   }
@@ -16,6 +22,8 @@ export function mergeGraphData(base: CrawlResult, update: CrawlResult): CrawlRes
   return {
     ...base,
     ...update,
+    // The expand endpoint's seed is the node being expanded, not the graph's original seed.
+    seedId: base.seedId,
     nodes: [...nodes.values()],
     edges: [...edges.values()],
     positions: { ...base.positions, ...update.positions },

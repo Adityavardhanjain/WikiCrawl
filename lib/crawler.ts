@@ -54,6 +54,10 @@ export interface CrawlOptions {
   seedTitle: string;
   depth: number;
   maxNodes: number;
+  /** IDs already known to the caller; treated as visited (not re-fetched) but valid edge endpoints. */
+  knownIds?: string[];
+  /** Depth of the seed within the caller's larger graph; new node depths are offset by this. */
+  baseDepth?: number;
   onProgress?: (progress: CrawlProgress) => void;
   onBatch?: (nodes: WikiNode[], edges: WikiEdge[]) => void;
 }
@@ -65,7 +69,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   partial: boolean;
   failedTitles: string[];
 }> {
-  const { seedTitle, depth, maxNodes, onProgress, onBatch } = options;
+  const { seedTitle, depth, maxNodes, knownIds = [], baseDepth = 0, onProgress, onBatch } = options;
   const requestBudget = getCrawlRequestBudget(maxNodes, depth);
   const progress: CrawlState = {
     nodes: [],
@@ -82,6 +86,18 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
   // Start with the seed page
   const seedNormalized = normalizeTitle(seedTitle);
+
+  // Known ids are valid edge endpoints but must not be re-fetched (except the seed, which is
+  // the node being expanded and needs its links discovered).
+  for (const knownId of knownIds) {
+    const normalizedKnown = normalizeTitle(knownId);
+    progress.nodeIds.add(normalizedKnown);
+    if (normalizedKnown !== seedNormalized) {
+      progress.visited.add(normalizedKnown);
+      queuedTitles.add(normalizedKnown);
+    }
+  }
+
   if (!isJunkTitle(seedNormalized)) {
     progress.queue.push({ title: seedNormalized, depth: 0 });
     queuedTitles.add(seedNormalized);
@@ -200,8 +216,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
           id: nodeId,
           title: nodeId,
           url: titleToUrl(nodeId),
-          extract: '',
-          depth: currentDepth,
+          depth: baseDepth + currentDepth,
           inDegree: 0,
           outDegree: 0,
           pagerank: 0,
@@ -379,7 +394,6 @@ export function buildGraph(nodes: WikiNode[], edges: WikiEdge[]): Graph {
       graph.addNode(node.id, {
         title: node.title,
         url: node.url,
-        extract: node.extract,
         depth: node.depth,
         pagerank: node.pagerank,
         betweenness: node.betweenness,

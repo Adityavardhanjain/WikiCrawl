@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 
 interface SearchResult {
   title: string;
-  exact?: boolean;
 }
 
 interface SeedSearchProps {
@@ -16,13 +15,20 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<NodeJS.Timeout>();
   const requestControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const cacheRef = useRef<Map<string, SearchResult[]>>(new Map());
+  const listboxId = useId();
+
+  const trimmedQuery = query.trim();
+  // Only treat the search as "empty" once a real response confirms it, never while still loading.
+  const showEmptyState = !isSearching && trimmedQuery.length > 0 && suggestions.length === 0;
+  const optionCount = showEmptyState ? 1 : suggestions.length;
+  const listVisible = showSuggestions && (suggestions.length > 0 || showEmptyState);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -96,7 +102,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
           setIsSearching(false);
         }
       }
-    }, 50);
+    }, 200);
 
     return () => {
       if (debounceRef.current) {
@@ -106,39 +112,57 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
     };
   }, [query]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (selectedIndex >= 0 && suggestions[selectedIndex]) {
-      handleSelect(suggestions[selectedIndex].title);
-    } else if (query.trim()) {
-      handleSelect(query.trim());
-    }
-  };
-
   const handleSelect = (title: string) => {
     setQuery(title);
     setShowSuggestions(false);
-    setSelectedIndex(-1);
+    setHighlightedIndex(-1);
     onSearch(title);
   };
 
+  const resolveSubmission = () => {
+    if (highlightedIndex >= 0) {
+      if (showEmptyState) {
+        handleSelect(trimmedQuery);
+      } else if (suggestions[highlightedIndex]) {
+        handleSelect(suggestions[highlightedIndex].title);
+      }
+      return;
+    }
+    if (!trimmedQuery) return;
+    const exactMatch = suggestions.find(
+      (suggestion) => suggestion.title.toLowerCase() === trimmedQuery.toLowerCase()
+    );
+    handleSelect(exactMatch ? exactMatch.title : trimmedQuery);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    resolveSubmission();
+  };
+
+  const getOptionId = (index: number) => `${listboxId}-option-${index}`;
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!showSuggestions || suggestions.length === 0) return;
+    if (!listVisible) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex((prev) =>
-        prev < suggestions.length - 1 ? prev + 1 : prev
-      );
+      setHighlightedIndex((prev) => (prev + 1) % optionCount);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : -1));
-    } else if (e.key === 'Enter' && selectedIndex >= 0) {
+      setHighlightedIndex((prev) => (prev <= 0 ? optionCount - 1 : prev - 1));
+    } else if (e.key === 'Home') {
       e.preventDefault();
-      handleSelect(suggestions[selectedIndex].title);
+      setHighlightedIndex(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setHighlightedIndex(optionCount - 1);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      resolveSubmission();
     } else if (e.key === 'Escape') {
       setShowSuggestions(false);
-      setSelectedIndex(-1);
+      setHighlightedIndex(-1);
     }
   };
 
@@ -152,65 +176,95 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </div>
-          
+
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
+            aria-expanded={listVisible}
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={highlightedIndex >= 0 ? getOptionId(highlightedIndex) : undefined}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
               setShowSuggestions(true);
-              setSelectedIndex(-1);
+              setHighlightedIndex(-1);
             }}
             onFocus={() => setShowSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+            onBlur={() => setShowSuggestions(false)}
             onKeyDown={handleKeyDown}
             placeholder="Search any Wikipedia article..."
-            className="w-full pl-12 pr-4 py-3.5 bg-slate-800/50 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 focus:bg-slate-800/80 transition-all"
+            className="w-full pl-12 pr-10 py-3.5 bg-slate-800/50 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 focus:bg-slate-800/80 transition-all"
             disabled={isLoading}
           />
-          
+
+          {isSearching && (
+            <div
+              aria-hidden="true"
+              className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent"
+            />
+          )}
+
           {/* Glow effect on focus */}
           <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-cyan-500/10 via-purple-500/10 to-pink-500/10 opacity-0 focus-within:opacity-100 transition-opacity pointer-events-none" />
-          
-          {showSuggestions && (
-            <div className="absolute z-50 w-full mt-2 glass-strong rounded-xl shadow-2xl overflow-hidden border border-white/10">
-              {isSearching && (
-                <div className="flex items-center gap-3 px-4 py-3 text-sm text-cyan-300">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-                  Searching...
-                </div>
-              )}
 
-              {!isSearching && suggestions.length > 0 && (
-                <ul>
-                  {suggestions.map((suggestion, index) => (
+          {listVisible && (
+            <ul
+              id={listboxId}
+              role="listbox"
+              className="absolute z-50 w-full mt-2 glass-strong rounded-xl shadow-2xl overflow-hidden border border-white/10"
+            >
+              {showEmptyState ? (
+                <li>
+                  <button
+                    type="button"
+                    id={getOptionId(0)}
+                    role="option"
+                    aria-selected={highlightedIndex === 0}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleSelect(trimmedQuery)}
+                    className={`w-full px-4 py-3 text-left text-slate-300 hover:bg-white/5 transition-all ${
+                      highlightedIndex === 0 ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-white' : ''
+                    }`}
+                  >
+                    No article found. Search &quot;{trimmedQuery}&quot; anyway
+                  </button>
+                </li>
+              ) : (
+                suggestions.map((suggestion, index) => {
+                  const isExact = suggestion.title.toLowerCase() === trimmedQuery.toLowerCase();
+                  return (
                     <li key={suggestion.title}>
                       <button
                         type="button"
+                        id={getOptionId(index)}
+                        role="option"
+                        aria-selected={index === highlightedIndex}
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => handleSelect(suggestion.title)}
                         className={`w-full px-4 py-3 text-left text-white hover:bg-gradient-to-r hover:from-cyan-500/20 hover:to-purple-500/20 transition-all flex items-center gap-3 ${
-                          index === selectedIndex ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20' : ''
+                          index === highlightedIndex ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20' : ''
                         }`}
                       >
                         <svg className="w-4 h-4 text-cyan-400/60 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         <span className="truncate">{suggestion.title}</span>
-                        {suggestion.exact && (
+                        {isExact && (
                           <span className="ml-auto flex-shrink-0 text-[10px] uppercase tracking-wider text-slate-500">
-                            Open exact title
+                            Exact match
                           </span>
                         )}
                       </button>
                     </li>
-                  ))}
-                </ul>
+                  );
+                })
               )}
-            </div>
+            </ul>
           )}
         </div>
-        
+
         <button
           type="submit"
           disabled={isLoading || !query.trim()}
@@ -234,3 +288,4 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
     </div>
   );
 }
+

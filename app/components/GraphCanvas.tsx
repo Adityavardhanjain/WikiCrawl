@@ -5,6 +5,7 @@ import Graph from 'graphology';
 import { Sigma } from 'sigma';
 import { EdgeArrowProgram, EdgeLineProgram } from 'sigma/rendering';
 import type { CrawlResult, WikiNode, PathResult } from '@/types/graph';
+import { getFocusCameraTarget } from '@/lib/cameraFocus';
 import { getCommunityColor, getNodeSize } from '@/lib/graphAnalysis';
 import { syncGraphData, updateGraphColors } from '@/lib/graphSync';
 import { seedInitialPositions } from '@/lib/layoutSeed';
@@ -48,6 +49,7 @@ export function GraphCanvas({
   const colorModeRef = useRef(colorMode);
   const topRankIdsRef = useRef(new Set<string>());
   const hubIdsRef = useRef(new Set<string>());
+  const maxDegreeRef = useRef(1);
   const showAllEdgesRef = useRef(false);
   const showArrowsRef = useRef(false);
   const pathNodeIdsRef = useRef(new Set<string>());
@@ -90,6 +92,10 @@ export function GraphCanvas({
       .slice(0, 100)
       .map((node) => node.id),
   ), [data.nodes]);
+  const maxDegree = useMemo(() => Math.max(
+    1,
+    ...data.nodes.map((node) => node.inDegree + node.outDegree),
+  ), [data.nodes]);
   const pathNodeIds = useMemo(() => new Set(path?.path ?? []), [path]);
   const pathEdgeKeys = useMemo(() => new Set(
     path?.path.slice(1).map((nodeId, index) => {
@@ -101,6 +107,7 @@ export function GraphCanvas({
   const denseEdges = edgeCount > 5000;
   topRankIdsRef.current = topRankIds;
   hubIdsRef.current = hubIds;
+  maxDegreeRef.current = maxDegree;
   pathNodeIdsRef.current = pathNodeIds;
   pathEdgeKeysRef.current = pathEdgeKeys;
   showAllEdgesRef.current = showAllEdges;
@@ -267,12 +274,8 @@ export function GraphCanvas({
 
         const sourceData = graph.getNodeAttributes(source).raw as WikiNode;
         const targetData = graph.getNodeAttributes(target).raw as WikiNode;
-        const maximumDegree = Math.max(
-          1,
-          ...dataRef.current.nodes.map((node) => node.inDegree + node.outDegree),
-        );
         const edgeAlpha = 0.06 + 0.22 * Math.sqrt(
-          Math.max(sourceData.inDegree + sourceData.outDegree, targetData.inDegree + targetData.outDegree) / maximumDegree,
+          Math.max(sourceData.inDegree + sourceData.outDegree, targetData.inDegree + targetData.outDegree) / maxDegreeRef.current,
         );
 
         if (isFocusedEdge) {
@@ -413,9 +416,8 @@ export function GraphCanvas({
       sizeForNode: (node) => getNodeSize(node.pagerank, 5, 18, rankValues),
       colorForNode: (node) => getNodeColor(node, data.seedId, colorModeRef.current, data.communities.length, maxDepth),
     });
-    focusedNodeRef.current = focusedNode;
-    focusNeighborsRef.current = focusedNode && graph.hasNode(focusedNode)
-      ? new Set(graph.neighbors(focusedNode))
+    focusNeighborsRef.current = focusedNodeRef.current && graph.hasNode(focusedNodeRef.current)
+      ? new Set(graph.neighbors(focusedNodeRef.current))
       : new Set();
     const shapeChanged = previousShapeRef.current.seedId !== data.seedId
       || previousShapeRef.current.nodes !== data.nodes.length
@@ -431,7 +433,7 @@ export function GraphCanvas({
     if (result.shouldFitCamera) {
       sigmaRef.current?.getCamera().animatedReset({ duration: 420 });
     }
-  }, [data, edgeCount, focusedNode, maxDepth, rankValues]);
+  }, [data, edgeCount, maxDegree, maxDepth, rankValues]);
 
   const { arranging, paused, togglePause } = useForceLayout(graphRef.current, {
     seedId: data.seedId,
@@ -465,22 +467,18 @@ export function GraphCanvas({
     if (!sigmaRef.current || !focusedNode) return;
 
     const camera = sigmaRef.current.getCamera();
-    const pos = graphRef.current.hasNode(focusedNode)
-      ? graphRef.current.getNodeAttributes(focusedNode)
-      : null;
-
-    if (pos) {
-      camera.animate({ x: pos.x, y: pos.y }, { duration: 300 });
-    }
+    const display = sigmaRef.current.getNodeDisplayData(focusedNode);
+    const target = getFocusCameraTarget(display);
+    if (target) camera.animate(target, { duration: 300 });
   }, [focusedNode]);
 
   useEffect(() => {
     if (!sigmaRef.current || !path || path.path.length === 0) return;
 
-    const graph = graphRef.current;
     const positions = path.path
-      .filter((nodeId) => graph.hasNode(nodeId))
-      .map((nodeId) => graph.getNodeAttributes(nodeId));
+      .map((nodeId) => sigmaRef.current?.getNodeDisplayData(nodeId))
+      .filter((display) => getFocusCameraTarget(display) !== null)
+      .map((display) => getFocusCameraTarget(display)!);
     if (positions.length === 0) return;
 
     const bounds = positions.reduce((current, position) => ({
@@ -499,11 +497,9 @@ export function GraphCanvas({
     const width = Math.max(bounds.maxX - bounds.minX, 0.08);
     const height = Math.max(bounds.maxY - bounds.minY, 0.08);
     const dimensions = sigmaRef.current.getDimensions();
-    const graphDimensions = sigmaRef.current.getGraphDimensions();
     const viewportAspect = dimensions.width / Math.max(dimensions.height, 1);
     const fitWidth = Math.max(width, height * viewportAspect);
-    const graphWidth = Math.max(graphDimensions.width, 0.08);
-    const ratio = Math.min(4, Math.max(0.22, (fitWidth / graphWidth) * 1.35));
+    const ratio = Math.min(4, Math.max(0.22, fitWidth * 1.35));
 
     sigmaRef.current.getCamera().animate({ x: centerX, y: centerY, ratio }, { duration: 420 });
   }, [path]);

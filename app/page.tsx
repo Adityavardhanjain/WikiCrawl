@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import type { Community, CrawlProgress, CrawlResult, WikiEdge, WikiNode, PathResult } from '@/types/graph';
 import { createCrawlRequest, getCrawlPayload, parseCrawlParams, buildExpandRequestBody, type CrawlRequest } from '@/lib/crawlRequest';
 import { mergeGraphData } from '@/lib/graphSync';
+import { toDisplayProgress } from '@/lib/progress';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
 import { MemoizedSidebar } from './components/Sidebar';
@@ -288,9 +289,6 @@ export default function Home() {
         });
         const issues = validateGraphData(result);
         if (issues.length > 0) throw new Error(issues[0]);
-        if (submittedRequestRef.current?.nonce === request.nonce) {
-          setLiveData(null);
-        }
         return result;
       } catch (error) {
         if (error instanceof CrawlNotFoundError) {
@@ -308,6 +306,7 @@ export default function Home() {
   });
 
   const displayData = data ?? liveData ?? previousDataRef.current;
+  const displayProgress = toDisplayProgress(isLoading, loadingProgress);
   const crawlStatus = error
     ? `Crawl error: ${error instanceof Error ? error.message : 'unable to load pages'}`
     : isLoading
@@ -317,6 +316,10 @@ export default function Home() {
         : '';
   const pathfinder = usePathfinder(displayData);
   const selectedNode = displayData?.nodes.find((node) => node.id === selectedNodeId) ?? null;
+
+  useEffect(() => {
+    if (data) setLiveData(null);
+  }, [data]);
 
   useEffect(() => {
     if (!pathSelection || !displayData) return;
@@ -359,11 +362,7 @@ export default function Home() {
       const timeout = window.setTimeout(() => setLoadingProgress(0), 300);
       return () => window.clearTimeout(timeout);
     }
-
-    if (loadingProgress === 0) {
-      setLoadingProgress(5);
-    }
-  }, [isLoading, loadingProgress]);
+  }, [isLoading]);
 
   // Expand mutation
   const expandMutation = useMutation({
@@ -545,12 +544,12 @@ export default function Home() {
             <div className="mb-4">
               <div className="mb-2 flex items-center justify-between text-xs text-slate-300">
                 <span>Crawling Wikipedia</span>
-                <span>{Math.round(loadingProgress * 100)}%</span>
+                <span>{Math.round(displayProgress * 100)}%</span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-slate-700/80">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 transition-all duration-500 ease-out"
-                  style={{ width: `${loadingProgress * 100}%` }}
+                  style={{ width: `${displayProgress * 100}%` }}
                 />
               </div>
             </div>
@@ -658,11 +657,11 @@ export default function Home() {
             <div className="absolute inset-x-4 top-4 z-30 flex justify-center">
               <div className="flex items-center gap-3 rounded-full border border-cyan-500/30 bg-slate-950/80 px-4 py-2 text-xs text-cyan-200 shadow-lg backdrop-blur-md">
                 <span>Exploring a new neighborhood...</span>
-                <span className="w-24 text-right tabular-nums transition-opacity duration-300">{Math.round(loadingProgress * 100)}%</span>
+                <span className="w-24 text-right tabular-nums transition-opacity duration-300">{Math.round(displayProgress * 100)}%</span>
                 <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/80">
                   <span
                     className="block h-full rounded-full bg-cyan-400 transition-[width] duration-300 ease-out"
-                    style={{ width: `${loadingProgress * 100}%` }}
+                    style={{ width: `${displayProgress * 100}%` }}
                   />
                 </span>
               </div>

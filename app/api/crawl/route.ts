@@ -13,34 +13,13 @@ export const maxDuration = 60;
 
 const encoder = new TextEncoder();
 
-export function safeSend(controller: ReadableStreamDefaultController, event: string, payload: unknown): boolean {
-  try {
-    controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
-    return true;
-  } catch (error) {
-    if (error instanceof TypeError) return false;
-    throw error;
-  }
-}
-
-export function safeClose(controller: ReadableStreamDefaultController): boolean {
-  try {
-    controller.close();
-    return true;
-  } catch (error) {
-    if (error instanceof TypeError) return false;
-    throw error;
-  }
+function sendStreamEvent(controller: ReadableStreamDefaultController, event: string, payload: unknown) {
+  controller.enqueue(
+    encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`)
+  );
 }
 
 export async function POST(request: NextRequest) {
-  const crawlAbortController = new AbortController();
-  let aborted = request.signal.aborted;
-  const handleAbort = () => {
-    aborted = true;
-    crawlAbortController.abort();
-  };
-  request.signal.addEventListener('abort', handleAbort, { once: true });
   try {
     const body = (await request.json()) as CrawlRequest;
     const { seedTitle, depth, maxNodes, knownNodeIds, knownEdgeIndexPairs, baseDepth } = body;
@@ -59,14 +38,11 @@ export async function POST(request: NextRequest) {
     const validatedDepth = Math.min(Math.max(depth || 2, 1), 3);
     const validatedMaxNodes = Math.min(Math.max(maxNodes || 150, 50), 500);
 
-    const seedPage = await getPageLinks(seedTitle, undefined, crawlAbortController.signal);
+    const seedPage = await getPageLinks(seedTitle);
     if (seedPage.missing) {
-      const suggestions = await searchWikipedia(seedTitle, crawlAbortController.signal)
+      const suggestions = await searchWikipedia(seedTitle)
         .then((results) => results.map((result) => result.title))
-        .catch((error) => {
-          if (error instanceof Error && error.name === 'AbortError') throw error;
-          return [];
-        });
+        .catch(() => []);
       return NextResponse.json(
         { error: 'not_found', title: seedTitle, suggestions },
         { status: 404 },
@@ -90,37 +66,18 @@ export async function POST(request: NextRequest) {
             maxNodes: validatedMaxNodes,
             knownIds,
             baseDepth: validatedBaseDepth,
-            signal: crawlAbortController.signal,
             onProgress: (progress) => {
               crawlProgress = progress;
-              if (!safeSend(controller, 'progress', { progress: crawlProgress })) {
-                aborted = true;
-                crawlAbortController.abort();
-              }
+              sendStreamEvent(controller, 'progress', { progress: crawlProgress });
             },
             onBatch: (nodes, edges) => {
-              if (nodes.length > 0 && !safeSend(controller, 'nodes', { nodes })) {
-                aborted = true;
-                crawlAbortController.abort();
-              }
-              if (edges.length > 0 && !safeSend(controller, 'edges', { edges })) {
-                aborted = true;
-                crawlAbortController.abort();
-              }
+              if (nodes.length > 0) sendStreamEvent(controller, 'nodes', { nodes });
+              if (edges.length > 0) sendStreamEvent(controller, 'edges', { edges });
             },
           });
 
-          if (aborted || request.signal.aborted) {
-            safeClose(controller);
-            return;
-          }
-
           if (partial) {
-            if (!safeSend(controller, 'warning', { failedTitles })) aborted = true;
-          }
-          if (aborted || request.signal.aborted) {
-            safeClose(controller);
-            return;
+            sendStreamEvent(controller, 'warning', { failedTitles });
           }
 
           const { nodes: deltaNodes, edges: deltaEdges } = sanitizeGraphData(crawledNodes, crawledEdges);
@@ -158,11 +115,7 @@ export async function POST(request: NextRequest) {
             inDegree: node.inDegree,
             outDegree: node.outDegree,
           }]));
-          if (!safeSend(controller, 'analysis', { metrics: allMetrics, communities })) aborted = true;
-          if (aborted || request.signal.aborted) {
-            safeClose(controller);
-            return;
-          }
+          sendStreamEvent(controller, 'analysis', { metrics: allMetrics, communities });
 
           // Expand responses are deltas: only new nodes/edges, plus updated metrics for known nodes.
           const resultNodes = isExpand ? analyzedNodes.filter((node) => deltaNodeIds.has(node.id)) : analyzedNodes;
@@ -185,27 +138,19 @@ export async function POST(request: NextRequest) {
             metrics: resultMetrics,
           };
 
-          if (!aborted && !request.signal.aborted && !isExpand && !partial) {
+          if (!isExpand && !partial) {
             setCachedResult(cacheKey, seedTitle, validatedDepth, validatedMaxNodes, result);
           }
-          if (!aborted) safeSend(controller, 'done', { result });
-          safeClose(controller);
+          sendStreamEvent(controller, 'done', { result });
+          controller.close();
         } catch (error) {
-          if (aborted || request.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
-            safeClose(controller);
-            return;
-          }
           console.error('Crawl error:', error);
-          safeSend(controller, 'error', {
+          sendStreamEvent(controller, 'error', {
             error: 'Failed to crawl Wikipedia',
             details: String(error),
           });
-          safeClose(controller);
+          controller.close();
         }
-      },
-      cancel() {
-        aborted = true;
-        request.signal.removeEventListener('abort', handleAbort);
       },
     });
 
@@ -217,10 +162,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    request.signal.removeEventListener('abort', handleAbort);
-    if (aborted || request.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
-      return new Response(null, { status: 499 });
-    }
     console.error('Crawl request error:', error);
     return NextResponse.json(
       { error: 'Failed to crawl Wikipedia', details: String(error) },

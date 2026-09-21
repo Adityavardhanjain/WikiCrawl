@@ -12,7 +12,6 @@ import { CrawlControls } from './components/CrawlControls';
 import { MemoizedSidebar } from './components/Sidebar';
 import { MemoizedNodeDetailPanel } from './components/NodeDetailPanel';
 import { usePathfinder } from './components/usePathfinder';
-import { BrandMark } from './components/BrandMark';
 
 // Dynamically import GraphCanvas to avoid SSR issues with WebGL/Sigma
 const GraphCanvas = dynamic(
@@ -106,7 +105,6 @@ function validateGraphData(data: Partial<CrawlResult> | null | undefined): strin
 async function readCrawlResponse(
   response: Response,
   onProgress?: (progress: CrawlProgress) => void,
-  signal?: AbortSignal,
   handlers?: {
     onNodes?: (nodes: WikiNode[]) => void;
     onEdges?: (edges: WikiEdge[]) => void;
@@ -136,7 +134,6 @@ async function readCrawlResponse(
   let finalResult: CrawlResult | null = null;
 
   while (true) {
-    if (signal?.aborted) throw new DOMException('The crawl was aborted', 'AbortError');
     const { done, value } = await reader.read();
     if (done) break;
 
@@ -168,10 +165,6 @@ async function readCrawlResponse(
 
   if (!finalResult) throw new Error('Crawl stream ended without a final result');
   return finalResult;
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
 }
 
 // Animated background particles
@@ -210,7 +203,6 @@ export default function Home() {
   const liveUpdateRef = useRef<((current: CrawlResult) => CrawlResult) | null>(null);
   const liveUpdateFrameRef = useRef<number | null>(null);
   const submittedRequestRef = useRef<CrawlRequest | null>(null);
-  const expandAbortControllerRef = useRef<AbortController | null>(null);
   const requestNonceRef = useRef(0);
 
   useEffect(() => {
@@ -249,7 +241,6 @@ export default function Home() {
     if (liveUpdateFrameRef.current !== null) {
       window.cancelAnimationFrame(liveUpdateFrameRef.current);
     }
-    expandAbortControllerRef.current?.abort();
   }, []);
 
   const updateLoadingProgress = useCallback((progress: CrawlProgress) => {
@@ -263,7 +254,7 @@ export default function Home() {
     queryKey: submittedRequest
       ? ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce]
       : ['crawl', 'idle'],
-    queryFn: async ({ signal }) => {
+    queryFn: async () => {
       if (!submittedRequest) throw new Error('No crawl request submitted');
       const request = submittedRequest;
       try {
@@ -271,9 +262,8 @@ export default function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(getCrawlPayload(request)),
-          signal,
         });
-        const result = await readCrawlResponse(response, updateLoadingProgress, signal, {
+        const result = await readCrawlResponse(response, updateLoadingProgress, {
           onNodes: (nodes) => mergeLiveData(request, (current) => ({
             ...current,
             nodes: (() => {
@@ -301,7 +291,6 @@ export default function Home() {
         if (issues.length > 0) throw new Error(issues[0]);
         return result;
       } catch (error) {
-        if (isAbortError(error) || signal.aborted) throw error;
         if (error instanceof CrawlNotFoundError) {
           setNotFound({ title: error.title, suggestions: error.suggestions });
           setGraphError(null);
@@ -375,17 +364,13 @@ export default function Home() {
   const expandMutation = useMutation({
     mutationFn: async (nodeId: string) => {
       if (!displayData) throw new Error('No graph data available to expand.');
-      const controller = new AbortController();
-      expandAbortControllerRef.current?.abort();
-      expandAbortControllerRef.current = controller;
       const response = await fetch('/api/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildExpandRequestBody(nodeId, displayData, depth, maxNodes)),
-        signal: controller.signal,
       });
 
-      const result = await readCrawlResponse(response, undefined, controller.signal);
+      const result = await readCrawlResponse(response);
       if (!Array.isArray(result.nodes) || !Array.isArray(result.edges)) {
         throw new Error('Received an invalid response while expanding this page.');
       }
@@ -401,7 +386,6 @@ export default function Home() {
       }
     },
     onError: (error) => {
-      if (isAbortError(error)) return;
       setGraphError(error instanceof Error ? error.message : 'Could not explore this page.');
     },
     onSettled: () => {
@@ -411,8 +395,6 @@ export default function Home() {
 
   // Handle search
   const handleSearch = useCallback((title: string) => {
-    expandAbortControllerRef.current?.abort();
-    expandAbortControllerRef.current = null;
     previousDataRef.current = data ?? liveData;
     const request = createCrawlRequest(title, depth, maxNodes, ++requestNonceRef.current);
     const url = new URL(window.location.href);
@@ -442,8 +424,6 @@ export default function Home() {
 
   const handleGoDeeper = useCallback(() => {
     if (!submittedRequest || submittedRequest.depth >= 3) return;
-    expandAbortControllerRef.current?.abort();
-    expandAbortControllerRef.current = null;
     const nextDepth = Math.min(3, submittedRequest.depth + 1);
     const nextMaxNodes = Math.min(500, submittedRequest.maxNodes * 2);
     previousDataRef.current = data ?? liveData;
@@ -580,7 +560,17 @@ export default function Home() {
           )}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
-              <BrandMark showWordmark />
+              {/* Animated logo */}
+              <div className="relative">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 via-purple-500 to-pink-500 p-[2px]">
+                  <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
+                    <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-xl blur opacity-40 -z-10 animate-pulse" />
+              </div>
               <div>
                 <h1 className="text-2xl font-bold">
                   <span className="gradient-text">WikiCrawl</span>

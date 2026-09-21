@@ -224,34 +224,6 @@ describe('offline crawler', () => {
     }
   });
 
-  it('stops issuing requests within a batch after abort', async () => {
-    const mock = installMockMediaWiki();
-    const abortController = new AbortController();
-    const originalFetch = globalThis.fetch;
-    let linkRequests = 0;
-    globalThis.fetch = (async (input, init) => {
-      const url = new URL(input.toString());
-      if (url.searchParams.get('action') === 'query' && url.searchParams.get('prop') === 'links') {
-        linkRequests += 1;
-        if (linkRequests === 1) abortController.abort();
-      }
-      return originalFetch(input, init);
-    }) as typeof fetch;
-
-    try {
-      await expect(crawlWikipedia({
-        seedTitle: 'Page 0',
-        depth: 1,
-        maxNodes: 50,
-        signal: abortController.signal,
-      })).rejects.toMatchObject({ name: 'AbortError' });
-      expect(linkRequests).toBe(1);
-    } finally {
-      globalThis.fetch = originalFetch;
-      mock.restore();
-    }
-  });
-
   it('keeps edges whose link target is resolved from a redirect', async () => {
     const mock = installMockMediaWiki({ pageviews: { 'Page 1': 100 } });
 

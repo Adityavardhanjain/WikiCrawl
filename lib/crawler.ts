@@ -1,5 +1,5 @@
 import Graph from 'graphology';
-import { createAbortError, getPageLinksBatch, getPageViews, titleToUrl } from './wikipedia';
+import { getPageLinksBatch, getPageViews, titleToUrl } from './wikipedia';
 import { isJunkTitle } from './filters';
 import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
 
@@ -71,7 +71,6 @@ export interface CrawlOptions {
   knownIds?: string[];
   /** Depth of the seed within the caller's larger graph; new node depths are offset by this. */
   baseDepth?: number;
-  signal?: AbortSignal;
   onProgress?: (progress: CrawlProgress) => void;
   onBatch?: (nodes: WikiNode[], edges: WikiEdge[]) => void;
 }
@@ -83,10 +82,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   partial: boolean;
   failedTitles: string[];
 }> {
-  const { seedTitle, depth, maxNodes, knownIds = [], baseDepth = 0, signal, onProgress, onBatch } = options;
-  const throwIfAborted = () => {
-    if (signal?.aborted) throw createAbortError();
-  };
+  const { seedTitle, depth, maxNodes, knownIds = [], baseDepth = 0, onProgress, onBatch } = options;
   const requestBudget = getCrawlRequestBudget(maxNodes, depth);
   const progress: CrawlState = {
     nodes: [],
@@ -131,7 +127,6 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     if (layer.length <= 1) return layer;
     const pageViews = await getPageViews(layer.map((item) => item.title), {
       concurrency: crawlConcurrency,
-      signal,
       beforeRequest: () => {
         if (requestsUsed >= requestBudget) return false;
         requestsUsed += 1;
@@ -182,30 +177,16 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   };
 
   const processBatch = async (batch: { title: string; depth: number }[]) => {
-    throwIfAborted();
 
     const batchTitles = batch.map(({ title }) => title);
     const fetchBatch = async (titles: string[], continueToken?: string) => {
-      throwIfAborted();
       if (requestsUsed >= requestBudget) return null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          throwIfAborted();
           requestsUsed += 1;
-          return await getPageLinksBatch(titles, continueToken, signal);
-        } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') throw error;
-          if (attempt === 0) {
-            await new Promise((resolve, reject) => {
-              const timer = setTimeout(resolve, 50);
-              const onAbort = () => {
-                clearTimeout(timer);
-                signal?.removeEventListener('abort', onAbort);
-                reject(createAbortError());
-              };
-              signal?.addEventListener('abort', onAbort, { once: true });
-            });
-          }
+          return await getPageLinksBatch(titles, continueToken);
+        } catch {
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 50));
         }
       }
       for (const title of batchTitles) progress.failedTitles.add(title);
@@ -242,7 +223,6 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     const batchCanonicalTitles = new Set<string>();
 
     for (const item of batchResults) {
-      throwIfAborted();
       if (!item) {
         activeWork -= 1;
         continue;
@@ -324,7 +304,6 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
       }
 
       for (const paginatedResult of paginatedResponse.pages) {
-        throwIfAborted();
         const currentLinks = collectedLinks.get(paginatedResult.title);
         const item = batchResults.find((batchItem) => batchItem?.title === paginatedResult.title);
         if (
@@ -369,7 +348,6 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   };
 
   while (progress.queue.length > 0 && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
-    throwIfAborted();
     const layerDepth = progress.queue[0].depth;
     const layer = await rankLayer(progress.queue.splice(0, progress.queue.length).filter((item) => item.depth === layerDepth));
     const remainingNodeBudget = maxNodes - progress.nodes.length;
@@ -385,7 +363,6 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     let nextBatchIndex = 0;
     const workers = Array.from({ length: Math.min(crawlConcurrency, batches.length) }, async () => {
       while (nextBatchIndex < batches.length && requestsUsed < requestBudget) {
-        throwIfAborted();
         await processBatch(batches[nextBatchIndex++]);
       }
     });

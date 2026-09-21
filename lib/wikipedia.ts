@@ -5,29 +5,8 @@ const USER_AGENT = 'WikiCrawl/1.0 (https://github.com/WikiCrawl)';
 const MAX_RETRIES = 3;
 const PAGEVIEW_TIMEOUT_MS = 5000;
 
-export function createAbortError(): Error {
-  const error = new Error('Operation aborted');
-  error.name = 'AbortError';
-  return error;
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(createAbortError());
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      reject(createAbortError());
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getRetryDelay(response: Response, attempt: number): number {
@@ -68,13 +47,9 @@ interface WikipediaResponse {
   };
 }
 
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw createAbortError();
-}
-
 async function fetchWikipedia(
   params: Record<string, string>,
-  options: { beforeRequest?: () => boolean; maxRetries?: number; timeoutMs?: number; signal?: AbortSignal } = {},
+  options: { beforeRequest?: () => boolean; maxRetries?: number; timeoutMs?: number } = {},
 ): Promise<WikipediaResponse> {
   const url = new URL(WIKIPEDIA_API_BASE);
   url.searchParams.set('format', 'json');
@@ -88,7 +63,6 @@ async function fetchWikipedia(
 
   const maxRetries = options.maxRetries ?? MAX_RETRIES;
   while (attempt <= maxRetries) {
-    throwIfAborted(options.signal);
     if (options.beforeRequest && !options.beforeRequest()) throw new Error('Wikipedia request budget exhausted');
     const controller = options.timeoutMs ? new AbortController() : undefined;
     const timeout = options.timeoutMs ? setTimeout(() => controller?.abort(), options.timeoutMs) : undefined;
@@ -99,7 +73,7 @@ async function fetchWikipedia(
           'User-Agent': USER_AGENT,
           Accept: 'application/json',
         },
-        signal: options.signal ?? controller?.signal,
+        signal: controller?.signal,
       });
     } finally {
       if (timeout) clearTimeout(timeout);
@@ -110,7 +84,7 @@ async function fetchWikipedia(
         throw new Error('Wikipedia is rate limiting requests. Please wait a moment and try again.');
       }
 
-      await sleep(getRetryDelay(response, attempt), options.signal);
+      await sleep(getRetryDelay(response, attempt));
       attempt += 1;
       continue;
     }
@@ -125,7 +99,7 @@ async function fetchWikipedia(
   throw new Error('Wikipedia request failed after retries');
 }
 
-export async function searchWikipedia(query: string, signal?: AbortSignal): Promise<WikipediaSearchResult[]> {
+export async function searchWikipedia(query: string): Promise<WikipediaSearchResult[]> {
   if (!query || query.trim().length < 1) {
     return [];
   }
@@ -135,7 +109,7 @@ export async function searchWikipedia(query: string, signal?: AbortSignal): Prom
     search: query,
     limit: '10',
     namespace: '0',
-  }, { signal }) as unknown as [string, string[], string[], string[]];
+  }) as unknown as [string, string[], string[], string[]];
 
   // opensearch returns [query, titles, descriptions, urls]
   const titles = data[1] ?? [];
@@ -161,7 +135,6 @@ const MAX_BATCH_TITLES = 50;
 export interface PageViewsOptions {
   concurrency?: number;
   beforeRequest?: () => boolean;
-  signal?: AbortSignal;
 }
 
 const accumulatedPages = new Map<string, { resolvedTitle: string; links: string[] }>();
@@ -177,10 +150,8 @@ function continuationPageId(token?: string): number | undefined {
 
 export async function getPageLinksBatch(
   titles: string[],
-  continueToken?: string,
-  signal?: AbortSignal,
+  continueToken?: string
 ): Promise<PageLinksBatchResult> {
-  throwIfAborted(signal);
   if (titles.length === 0) {
     return { pages: [] };
   }
@@ -271,8 +242,8 @@ export async function getPageLinksBatch(
   };
 }
 
-export async function getPageLinks(title: string, continueToken?: string, signal?: AbortSignal): Promise<PageLinksResult> {
-  const result = await getPageLinksBatch([title], continueToken, signal);
+export async function getPageLinks(title: string, continueToken?: string): Promise<PageLinksResult> {
+  const result = await getPageLinksBatch([title], continueToken);
   return result.pages[0] || { title, resolvedTitle: title, links: [] };
 }
 
@@ -306,7 +277,7 @@ export async function getPageViews(
         prop: 'pageviews',
         pvipdays: '30',
         redirects: '1',
-      }, { beforeRequest: options.beforeRequest, maxRetries: 0, timeoutMs: PAGEVIEW_TIMEOUT_MS, signal: options.signal });
+      }, { beforeRequest: options.beforeRequest, maxRetries: 0, timeoutMs: PAGEVIEW_TIMEOUT_MS });
       const pages = data.query?.pages ?? [];
       const redirects = data.query?.redirects ?? [];
       const redirectMap = new Map(redirects.map((redirect) => [redirect.from || redirect.title || '', redirect.to]));
@@ -323,15 +294,13 @@ export async function getPageViews(
         views.set(title, total);
         setCachedPageViews(title, total);
       }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') throw error;
+    } catch {
       // Pageviews are optional; callers use a deterministic fallback when unavailable.
     }
   };
 
   const workers = Array.from({ length: Math.min(concurrency, batches.length) }, async () => {
     while (nextBatchIndex < batches.length) {
-      throwIfAborted(options.signal);
       const batch = batches[nextBatchIndex++];
       if (batch) await fetchBatch(batch);
     }

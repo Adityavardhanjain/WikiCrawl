@@ -12,6 +12,7 @@ import { CrawlControls } from './components/CrawlControls';
 import { MemoizedSidebar } from './components/Sidebar';
 import { MemoizedNodeDetailPanel } from './components/NodeDetailPanel';
 import { usePathfinder } from './components/usePathfinder';
+import { BrandMark } from './components/BrandMark';
 
 // Dynamically import GraphCanvas to avoid SSR issues with WebGL/Sigma
 const GraphCanvas = dynamic(
@@ -579,21 +580,10 @@ export default function Home() {
           )}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
-              {/* Animated logo */}
-              <div className="relative">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 via-purple-500 to-pink-500 p-[2px]">
-                  <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
-                    <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                  </div>
-                </div>
-                <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-xl blur opacity-40 -z-10 animate-pulse" />
-              </div>
+              <BrandMark size="small" />
               <div>
                 <h1 className="text-2xl font-bold">
-                  <span className="gradient-text">WikiCrawl</span>
-                  <span className="text-white/90"> / field notes</span>
+                  <span className="text-white/90">/ field notes</span>
                 </h1>
                 <p className="text-sm text-cyan-400/80">A visual index of unexpected connections</p>
               </div>

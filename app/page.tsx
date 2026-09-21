@@ -105,6 +105,7 @@ function validateGraphData(data: Partial<CrawlResult> | null | undefined): strin
 async function readCrawlResponse(
   response: Response,
   onProgress?: (progress: CrawlProgress) => void,
+  signal?: AbortSignal,
   handlers?: {
     onNodes?: (nodes: WikiNode[]) => void;
     onEdges?: (edges: WikiEdge[]) => void;
@@ -134,6 +135,7 @@ async function readCrawlResponse(
   let finalResult: CrawlResult | null = null;
 
   while (true) {
+    if (signal?.aborted) throw new DOMException('The crawl was aborted', 'AbortError');
     const { done, value } = await reader.read();
     if (done) break;
 
@@ -167,6 +169,10 @@ async function readCrawlResponse(
   return finalResult;
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 // Animated background particles
 function AnimatedBackground() {
   return (
@@ -197,13 +203,13 @@ export default function Home() {
   const [graphError, setGraphError] = useState<string | null>(null);
   const [crawlWarning, setCrawlWarning] = useState<number | null>(null);
   const [notFound, setNotFound] = useState<{ title: string; suggestions: string[] } | null>(null);
-  const [explorationHistory, setExplorationHistory] = useState<Array<{ id: string; title: string }>>([]);
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null);
   const [expandNotice, setExpandNotice] = useState<string | null>(null);
   const liveUpdateRef = useRef<((current: CrawlResult) => CrawlResult) | null>(null);
   const liveUpdateFrameRef = useRef<number | null>(null);
   const submittedRequestRef = useRef<CrawlRequest | null>(null);
+  const expandAbortControllerRef = useRef<AbortController | null>(null);
   const requestNonceRef = useRef(0);
 
   useEffect(() => {
@@ -242,6 +248,7 @@ export default function Home() {
     if (liveUpdateFrameRef.current !== null) {
       window.cancelAnimationFrame(liveUpdateFrameRef.current);
     }
+    expandAbortControllerRef.current?.abort();
   }, []);
 
   const updateLoadingProgress = useCallback((progress: CrawlProgress) => {
@@ -255,7 +262,7 @@ export default function Home() {
     queryKey: submittedRequest
       ? ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce]
       : ['crawl', 'idle'],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!submittedRequest) throw new Error('No crawl request submitted');
       const request = submittedRequest;
       try {
@@ -263,8 +270,9 @@ export default function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(getCrawlPayload(request)),
+          signal,
         });
-        const result = await readCrawlResponse(response, updateLoadingProgress, {
+        const result = await readCrawlResponse(response, updateLoadingProgress, signal, {
           onNodes: (nodes) => mergeLiveData(request, (current) => ({
             ...current,
             nodes: (() => {
@@ -292,6 +300,7 @@ export default function Home() {
         if (issues.length > 0) throw new Error(issues[0]);
         return result;
       } catch (error) {
+        if (isAbortError(error) || signal.aborted) throw error;
         if (error instanceof CrawlNotFoundError) {
           setNotFound({ title: error.title, suggestions: error.suggestions });
           setGraphError(null);
@@ -355,20 +364,6 @@ export default function Home() {
   }, [displayData, selectedNodeId]);
 
   useEffect(() => {
-    if (!selectedNode || !selectedNode.title) return;
-
-    setExplorationHistory((current) => {
-      const next = [...current];
-      const existingIndex = next.findIndex((item) => item.id === selectedNode.id);
-      if (existingIndex >= 0) {
-        next.splice(existingIndex, 1);
-      }
-      next.push({ id: selectedNode.id, title: selectedNode.title });
-      return next.slice(-6);
-    });
-  }, [selectedNode]);
-
-  useEffect(() => {
     if (!isLoading) {
       const timeout = window.setTimeout(() => setLoadingProgress(0), 300);
       return () => window.clearTimeout(timeout);
@@ -379,13 +374,17 @@ export default function Home() {
   const expandMutation = useMutation({
     mutationFn: async (nodeId: string) => {
       if (!displayData) throw new Error('No graph data available to expand.');
+      const controller = new AbortController();
+      expandAbortControllerRef.current?.abort();
+      expandAbortControllerRef.current = controller;
       const response = await fetch('/api/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildExpandRequestBody(nodeId, displayData, depth, maxNodes)),
+        signal: controller.signal,
       });
 
-      const result = await readCrawlResponse(response);
+      const result = await readCrawlResponse(response, undefined, controller.signal);
       if (!Array.isArray(result.nodes) || !Array.isArray(result.edges)) {
         throw new Error('Received an invalid response while expanding this page.');
       }
@@ -401,6 +400,7 @@ export default function Home() {
       }
     },
     onError: (error) => {
+      if (isAbortError(error)) return;
       setGraphError(error instanceof Error ? error.message : 'Could not explore this page.');
     },
     onSettled: () => {
@@ -410,6 +410,8 @@ export default function Home() {
 
   // Handle search
   const handleSearch = useCallback((title: string) => {
+    expandAbortControllerRef.current?.abort();
+    expandAbortControllerRef.current = null;
     previousDataRef.current = data ?? liveData;
     const request = createCrawlRequest(title, depth, maxNodes, ++requestNonceRef.current);
     const url = new URL(window.location.href);
@@ -432,7 +434,6 @@ export default function Home() {
     setSelectedNodeId(null);
     setFocusedNode(null);
     setPathSelection(null);
-    setExplorationHistory([]);
     setExpandedNodeIds(new Set());
     setExpandingNodeId(null);
     setExpandNotice(null);
@@ -440,6 +441,8 @@ export default function Home() {
 
   const handleGoDeeper = useCallback(() => {
     if (!submittedRequest || submittedRequest.depth >= 3) return;
+    expandAbortControllerRef.current?.abort();
+    expandAbortControllerRef.current = null;
     const nextDepth = Math.min(3, submittedRequest.depth + 1);
     const nextMaxNodes = Math.min(500, submittedRequest.maxNodes * 2);
     previousDataRef.current = data ?? liveData;
@@ -738,31 +741,6 @@ export default function Home() {
 
           {displayData && (
             <>
-              {explorationHistory.length > 0 && (
-                <div className="absolute left-1/2 top-4 -translate-x-1/2 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-slate-900/80 px-3 py-2 text-xs text-slate-300 backdrop-blur-md">
-                  {explorationHistory.map((step, index) => (
-                    <div key={step.id} className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const node = displayData.nodes.find((candidate) => candidate.id === step.id);
-                          if (node) {
-                            setSelectedNodeId(node.id);
-                            setFocusedNode(node.id);
-                          }
-                        }}
-                        className="rounded-full bg-white/5 px-2.5 py-1.5 text-slate-200 transition hover:bg-white/10 hover:text-white"
-                      >
-                        {step.title}
-                      </button>
-                      {index < explorationHistory.length - 1 && (
-                        <span className="text-slate-500">→</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
               <GraphCanvas
                 data={displayData}
                 colorMode={colorMode}

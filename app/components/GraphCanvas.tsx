@@ -525,8 +525,14 @@ export function GraphCanvas({
   };
 
   return (
-    <div ref={containerRef} className="graph-surface w-full h-full relative">
-      <div className="absolute top-4 right-4 flex gap-1 graph-overlay rounded-lg p-1 z-10">
+    <div className="relative w-full h-full">
+      <div ref={containerRef} className="graph-surface absolute inset-0 relative" />
+
+      <div
+        className="absolute top-4 right-4 flex gap-1 graph-overlay rounded-lg p-1 z-10"
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+      >
         <button className="graph-control" onClick={() => sigmaRef.current?.getCamera().animatedZoom({ duration: 180 })} aria-label="Zoom in">+</button>
         <button className="graph-control" onClick={() => sigmaRef.current?.getCamera().animatedUnzoom({ duration: 180 })} aria-label="Zoom out">-</button>
         <button aria-label="Fit graph to view" className="graph-control graph-control-wide" onClick={() => sigmaRef.current?.getCamera().animatedReset({ duration: 220 })}>Fit</button>
@@ -542,7 +548,11 @@ export function GraphCanvas({
       </div>
 
       {(arranging || paused) && (
-        <div className="absolute top-16 right-4 graph-overlay rounded-lg px-3 py-2 text-xs text-cyan-200 z-10">
+        <div
+          className="absolute top-16 right-4 graph-overlay rounded-lg px-3 py-2 text-xs text-cyan-200 z-10"
+          onPointerDown={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
+        >
           <span>{paused ? 'Paused' : 'Arranging...'}</span>
           <button className="ml-3 text-white underline" onClick={togglePause}>
             {paused ? 'Resume' : 'Pause'}
@@ -550,7 +560,11 @@ export function GraphCanvas({
         </div>
       )}
 
-      <div className="absolute top-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-w-xs">
+      <div
+        className="absolute top-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-w-xs"
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+      >
         <div className="text-white font-semibold mb-3 flex items-center gap-2">
           <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -605,7 +619,11 @@ export function GraphCanvas({
         </div>
       ))}
 
-      <div className="absolute bottom-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-sm:hidden">
+      <div
+        className="absolute bottom-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-sm:hidden"
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+      >
         <div className="text-white font-semibold mb-3 flex items-center gap-2">
           <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />

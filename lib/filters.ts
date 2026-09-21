@@ -1,4 +1,8 @@
-export const DENYLIST: RegExp[] = [];
+export const DENYLIST: RegExp[] = [
+  /^Copyright( renewal.*)?$/i,
+  /^Wayback Machine$/i,
+  /^Wikidata$/i,
+];
 
 export interface JunkTitleOptions {
   rejectYearOnly?: boolean;

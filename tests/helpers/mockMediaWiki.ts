@@ -1,12 +1,17 @@
-export type MockMediaWikiMode = 'default' | 'topical';
+export type MockMediaWikiMode = 'default' | 'topical' | 'alphabetical';
 
 export interface MockMediaWikiStats {
   requests: number;
   linkRowsDownloaded: number;
+  pageviewRequests: number;
+  pageviewLatencyMs: number;
 }
 
 export interface MockMediaWikiOptions {
   mode?: MockMediaWikiMode;
+  pageviews?: Record<string, number>;
+  pageviewsFail?: boolean;
+  pageviewLatencyMs?: number;
 }
 
 export interface MockMediaWikiHandle {
@@ -27,6 +32,13 @@ function pageNumber(title: string): number | null {
 
 function isKnownPage(title: string): boolean {
   return pageNumber(title) !== null;
+}
+
+function alphabeticalLinks(title: string): string[] {
+  if (normalizeTitle(title) === 'Page 0') {
+    return Array.from({ length: 400 }, (_, index) => `Article ${String.fromCharCode(65 + Math.floor(index / 16))}${String(index).padStart(3, '0')}`);
+  }
+  return Array.from({ length: 8 }, (_, index) => `Depth topic ${index}`);
 }
 
 function canonicalTitle(title: string): string {
@@ -60,15 +72,15 @@ function responseFor(
   const pages = titles
     .map((title) => {
       const normalizedTitle = normalizeTitle(title);
-      if (!isKnownPage(normalizedTitle)) {
+      if (mode !== 'alphabetical' && !isKnownPage(normalizedTitle)) {
         return { title: normalizedTitle, missing: true };
       }
       const canonical = canonicalTitle(normalizedTitle);
-      const links = mode === 'topical' ? topicalLinks(canonical) : defaultLinks(canonical);
+      const links = mode === 'topical' ? topicalLinks(canonical) : mode === 'alphabetical' ? alphabeticalLinks(canonical) : defaultLinks(canonical);
       const pageLinks = links.slice(offset, offset + LINKS_PER_REQUEST);
       stats.linkRowsDownloaded += pageLinks.length;
       return {
-        pageid: pageNumber(normalizedTitle)!,
+        pageid: pageNumber(normalizedTitle) ?? titles.indexOf(title) + 1,
         title: canonical,
         links: pageLinks.map((link) => ({ title: link })),
       };
@@ -76,8 +88,8 @@ function responseFor(
     .sort((left, right) => left.title.localeCompare(right.title));
 
   const hasMore = titles.some((title) => {
-    if (!isKnownPage(title)) return false;
-    const links = mode === 'topical' ? topicalLinks(canonicalTitle(title)) : defaultLinks(canonicalTitle(title));
+    if (mode !== 'alphabetical' && !isKnownPage(title)) return false;
+    const links = mode === 'topical' ? topicalLinks(canonicalTitle(title)) : mode === 'alphabetical' ? alphabeticalLinks(canonicalTitle(title)) : defaultLinks(canonicalTitle(title));
     return offset + LINKS_PER_REQUEST < links.length;
   });
 
@@ -93,7 +105,7 @@ function responseFor(
 
 export function installMockMediaWiki(options: MockMediaWikiOptions = {}): MockMediaWikiHandle {
   const mode = options.mode ?? 'default';
-  const stats: MockMediaWikiStats = { requests: 0, linkRowsDownloaded: 0 };
+  const stats: MockMediaWikiStats = { requests: 0, linkRowsDownloaded: 0, pageviewRequests: 0, pageviewLatencyMs: options.pageviewLatencyMs ?? 0 };
   const originalFetch = globalThis.fetch;
 
   globalThis.fetch = async (input: RequestInfo | URL): Promise<Response> => {
@@ -105,6 +117,24 @@ export function installMockMediaWiki(options: MockMediaWikiOptions = {}): MockMe
     if (action === 'opensearch') {
       const search = url.searchParams.get('search') || 'Page 0';
       return Response.json([search, ['Page 0', 'Page 1'], ['Synthetic page'], ['https://example.test/Page_0']]);
+    }
+
+    if (action === 'query' && url.searchParams.get('prop') === 'pageviews') {
+      stats.pageviewRequests += 1;
+      if (options.pageviewLatencyMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.pageviewLatencyMs));
+      }
+      if (options.pageviewsFail) return new Response('failed', { status: 503 });
+      const configuredViews = options.pageviews ?? {};
+      const titles = (url.searchParams.get('titles') || '').split('|').filter(Boolean);
+      return Response.json({
+        query: {
+          pages: titles.map((title) => ({
+            title,
+            pageviews: Object.fromEntries(Array.from({ length: 30 }, (_, index) => [`2026${String(index + 1).padStart(2, '0')}01`, configuredViews[title] ?? 0])),
+          })),
+        },
+      });
     }
 
     if (action !== 'query' || url.searchParams.get('prop') !== 'links') {

@@ -525,8 +525,8 @@ export function GraphCanvas({
   };
 
   return (
-    <div className="relative w-full h-full">
-      <div ref={containerRef} className="graph-surface absolute inset-0 relative" />
+    <div className="relative w-full h-full min-h-0">
+      <div ref={containerRef} className="graph-surface absolute inset-0 w-full h-full" />
 
       <div
         className="absolute top-4 right-4 flex gap-1 graph-overlay rounded-lg p-1 z-10"

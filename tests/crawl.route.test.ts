@@ -4,6 +4,8 @@ import { installMockMediaWiki } from './helpers/mockMediaWiki';
 vi.mock('../lib/db', () => ({
   getCachedPageLinks: vi.fn(() => null),
   setCachedPageLinks: vi.fn(),
+  getCachedPageViews: vi.fn(() => null),
+  setCachedPageViews: vi.fn(),
   getCachedResult: vi.fn(() => null),
   setCachedResult: vi.fn(),
   generateCacheKey: vi.fn(() => 'test-cache-key'),

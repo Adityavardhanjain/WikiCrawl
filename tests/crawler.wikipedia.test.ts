@@ -2,15 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { installMockMediaWiki } from './helpers/mockMediaWiki';
 
 const pageCache = vi.hoisted(() => new Map<string, { title: string; resolvedTitle: string; links: string[]; complete: boolean }>());
+const pageViewCache = vi.hoisted(() => new Map<string, number>());
 
 vi.mock('../lib/db', () => ({
   getCachedPageLinks: vi.fn((title: string) => pageCache.get(title.toLowerCase()) ?? null),
   setCachedPageLinks: vi.fn((page: { title: string; resolvedTitle: string; links: string[]; complete: boolean }) => {
     pageCache.set(page.title.toLowerCase(), page);
   }),
+  getCachedPageViews: vi.fn((title: string) => pageViewCache.get(title.toLowerCase()) ?? null),
+  setCachedPageViews: vi.fn((title: string, views: number) => pageViewCache.set(title.toLowerCase(), views)),
 }));
 
-import { crawlWikipedia } from '../lib/crawler';
+import { crawlWikipedia, getCrawlRequestBudget } from '../lib/crawler';
 import { getPageLinksBatch } from '../lib/wikipedia';
 import { setCachedPageLinks } from '../lib/db';
 
@@ -18,6 +21,7 @@ describe('offline crawler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     pageCache.clear();
+    pageViewCache.clear();
   });
 
   it('crawls a small graph with bounded nodes, unique edges, and depth metadata', async () => {
@@ -40,9 +44,9 @@ describe('offline crawler', () => {
         .toBe(result.edges.length);
       expect(result.nodes.every((node) => node.depth >= 0 && node.depth <= 2)).toBe(true);
       expect(result.nodes.find((node) => node.id === 'Page 0')?.depth).toBe(0);
-      expect(progress.length).toBe(result.nodes.length);
-      expect(progress.map(({ done }) => done)).toEqual(
-        Array.from({ length: progress.length }, (_, index) => index + 1),
+      expect(progress.length).toBeGreaterThanOrEqual(result.nodes.length);
+      expect(progress.slice(0, result.nodes.length).map(({ done }) => done)).toEqual(
+        Array.from({ length: result.nodes.length }, (_, index) => index + 1),
       );
       expect(progress.every(({ target }) => target >= 1)).toBe(true);
       expect(mock.stats.requests).toBeGreaterThan(0);
@@ -146,11 +150,85 @@ describe('offline crawler', () => {
     }
   });
 
-  it('keeps edges whose link target is resolved from a redirect', async () => {
+  it('caps layer 1 for deeper crawls and rolls into layer 2', async () => {
     const mock = installMockMediaWiki();
 
     try {
-      const result = await crawlWikipedia({ seedTitle: 'Page 0', depth: 1, maxNodes: 3 });
+      const result = await crawlWikipedia({ seedTitle: 'Page 0', depth: 2, maxNodes: 20 });
+      const layerOneCount = result.nodes.filter((node) => node.depth === 1).length;
+      expect(layerOneCount).toBeLessThanOrEqual(Math.ceil(0.4 * 20));
+      expect(result.nodes.some((node) => node.depth === 2)).toBe(true);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('does not get trapped in an alphabetical 400-link layer', async () => {
+    const mock = installMockMediaWiki({ mode: 'alphabetical' });
+
+    try {
+      const result = await crawlWikipedia({ seedTitle: 'Page 0', depth: 2, maxNodes: 150 });
+      expect(result.nodes.filter((node) => node.depth === 1).length).toBeLessThanOrEqual(60);
+      expect(result.nodes.some((node) => node.depth === 2)).toBe(true);
+      expect(result.nodes.some((node) => /Article [D-Z]/.test(node.title))).toBe(true);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('uses pageview popularity before the deterministic fallback order', async () => {
+    const mock = installMockMediaWiki({
+      pageviews: { 'Page 1': 1, 'Page 2': 100, 'Page 3': 50, 'Page 4': 25 },
+    });
+
+    try {
+      const result = await crawlWikipedia({ seedTitle: 'Page 0', depth: 2, maxNodes: 8 });
+      const layerOne = result.nodes.filter((node) => node.depth === 1).map((node) => node.id);
+      expect(layerOne.slice(0, 3)).toEqual(['Page 2', 'Page 3', 'Page 4']);
+      expect(mock.stats.pageviewRequests).toBeGreaterThan(0);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('falls back to a stable seeded order when pageviews fail', async () => {
+    const firstMock = installMockMediaWiki({ pageviewsFail: true });
+    let first: string[];
+    try {
+      first = (await crawlWikipedia({ seedTitle: 'Page 0', depth: 1, maxNodes: 12 }))
+        .nodes.filter((node) => node.depth === 1).map((node) => node.id);
+    } finally {
+      firstMock.restore();
+    }
+
+    const secondMock = installMockMediaWiki({ pageviewsFail: true });
+    try {
+      const second = (await crawlWikipedia({ seedTitle: 'Page 0', depth: 1, maxNodes: 12 }))
+        .nodes.filter((node) => node.depth === 1).map((node) => node.id);
+      expect(second).toEqual(first!);
+      expect(second).not.toEqual([...second].sort((left, right) => left.localeCompare(right)));
+    } finally {
+      secondMock.restore();
+    }
+  });
+
+  it('fills the full node budget at depth 1 and counts ranking requests', async () => {
+    const mock = installMockMediaWiki({ pageviewsFail: true });
+
+    try {
+      const result = await crawlWikipedia({ seedTitle: 'Page 0', depth: 1, maxNodes: 20 });
+      expect(result.nodes).toHaveLength(20);
+      expect(mock.stats.requests).toBeLessThanOrEqual(getCrawlRequestBudget(20, 1));
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('keeps edges whose link target is resolved from a redirect', async () => {
+    const mock = installMockMediaWiki({ pageviews: { 'Page 1': 100 } });
+
+    try {
+      const result = await crawlWikipedia({ seedTitle: 'Page 0', depth: 1, maxNodes: 20 });
       expect(result.nodes.map((node) => node.id)).toContain('Page 1');
       expect(result.edges).toContainEqual({ source: 'Page 0', target: 'Page 1' });
     } finally {

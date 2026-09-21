@@ -16,4 +16,13 @@ describe('title filters', () => {
       DENYLIST.pop();
     }
   });
+
+  it('rejects only the explicitly configured non-topical hubs', () => {
+    expect(isJunkTitle('Copyright')).toBe(true);
+    expect(isJunkTitle('Copyright renewal in the United States')).toBe(true);
+    expect(isJunkTitle('Wayback Machine')).toBe(true);
+    expect(isJunkTitle('Wikidata')).toBe(true);
+    expect(isJunkTitle('Copyright law')).toBe(false);
+    expect(isJunkTitle('Wikimedia Commons')).toBe(false);
+  });
 });

@@ -1,4 +1,4 @@
-import { getCachedPageLinks, setCachedPageLinks } from './db';
+import { getCachedPageLinks, getCachedPageViews, setCachedPageLinks, setCachedPageViews } from './db';
 
 const WIKIPEDIA_API_BASE = 'https://en.wikipedia.org/w/api.php';
 const USER_AGENT = 'WikiCrawl/1.0 (https://github.com/WikiCrawl)';
@@ -33,6 +33,7 @@ interface WikipediaPage {
   title: string;
   missing?: boolean;
   links?: WikipediaLink[];
+  pageviews?: Record<string, number | null>;
 }
 
 interface WikipediaResponse {
@@ -45,7 +46,10 @@ interface WikipediaResponse {
   };
 }
 
-async function fetchWikipedia(params: Record<string, string>): Promise<WikipediaResponse> {
+async function fetchWikipedia(
+  params: Record<string, string>,
+  beforeRequest?: () => boolean,
+): Promise<WikipediaResponse> {
   const url = new URL(WIKIPEDIA_API_BASE);
   url.searchParams.set('format', 'json');
   url.searchParams.set('origin', '*');
@@ -57,6 +61,7 @@ async function fetchWikipedia(params: Record<string, string>): Promise<Wikipedia
   let attempt = 0;
 
   while (attempt <= MAX_RETRIES) {
+    if (beforeRequest && !beforeRequest()) throw new Error('Wikipedia request budget exhausted');
     const response = await fetch(url.toString(), {
       headers: {
         'User-Agent': USER_AGENT,
@@ -116,6 +121,11 @@ export interface PageLinksBatchResult {
 }
 
 const MAX_BATCH_TITLES = 50;
+
+export interface PageViewsOptions {
+  concurrency?: number;
+  beforeRequest?: () => boolean;
+}
 
 const accumulatedPages = new Map<string, { resolvedTitle: string; links: string[] }>();
 
@@ -225,6 +235,68 @@ export async function getPageLinksBatch(
 export async function getPageLinks(title: string, continueToken?: string): Promise<PageLinksResult> {
   const result = await getPageLinksBatch([title], continueToken);
   return result.pages[0] || { title, resolvedTitle: title, links: [] };
+}
+
+export async function getPageViews(
+  titles: string[],
+  options: PageViewsOptions = {},
+): Promise<Map<string, number>> {
+  const requestedTitles = [...new Set(titles.map((title) => title.trim()).filter(Boolean))];
+  const views = new Map<string, number>();
+  const missingTitles: string[] = [];
+
+  for (const title of requestedTitles) {
+    const cached = getCachedPageViews(title);
+    if (cached === null) missingTitles.push(title);
+    else views.set(title, cached);
+  }
+
+  const batches: string[][] = [];
+  for (let index = 0; index < missingTitles.length; index += MAX_BATCH_TITLES) {
+    batches.push(missingTitles.slice(index, index + MAX_BATCH_TITLES));
+  }
+
+  let nextBatchIndex = 0;
+  const concurrency = Math.max(1, Math.trunc(options.concurrency ?? 1));
+  const fetchBatch = async (batch: string[]) => {
+    try {
+      const data = await fetchWikipedia({
+        action: 'query',
+        formatversion: '2',
+        titles: batch.join('|'),
+        prop: 'pageviews',
+        pvipdays: '30',
+        redirects: '1',
+      }, options.beforeRequest);
+      const pages = data.query?.pages ?? [];
+      const redirects = data.query?.redirects ?? [];
+      const redirectMap = new Map(redirects.map((redirect) => [redirect.from || redirect.title || '', redirect.to]));
+
+      for (const title of batch) {
+        const resolvedTitle = redirectMap.get(title) ?? title;
+        const page = pages.find((candidate) => (
+          candidate.title.toLowerCase() === resolvedTitle.toLowerCase()
+          || candidate.title.toLowerCase() === title.toLowerCase()
+        ));
+        const total: number = page
+          ? Object.values(page.pageviews ?? {}).reduce<number>((sum, value) => sum + (typeof value === 'number' ? value : 0), 0)
+          : 0;
+        views.set(title, total);
+        setCachedPageViews(title, total);
+      }
+    } catch {
+      // Pageviews are optional; callers use a deterministic fallback when unavailable.
+    }
+  };
+
+  const workers = Array.from({ length: Math.min(concurrency, batches.length) }, async () => {
+    while (nextBatchIndex < batches.length) {
+      const batch = batches[nextBatchIndex++];
+      if (batch) await fetchBatch(batch);
+    }
+  });
+  await Promise.all(workers);
+  return views;
 }
 
 export function titleToUrl(title: string): string {

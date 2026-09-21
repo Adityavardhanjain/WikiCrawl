@@ -4,6 +4,7 @@ import type { CrawlResult } from '@/types/graph';
 
 const DB_PATH = path.join(process.cwd(), 'wiki-crawl.db');
 const PAGE_LINKS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const PAGE_VIEWS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface CachedPageLinks {
   title: string;
@@ -37,6 +38,12 @@ function getDb(): Database.Database {
         title TEXT PRIMARY KEY,
         resolved_title TEXT NOT NULL,
         links TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS page_views_cache (
+        title TEXT PRIMARY KEY,
+        views INTEGER NOT NULL,
         created_at TEXT NOT NULL
       );
     `);
@@ -93,6 +100,35 @@ export function setCachedPageLinks(page: CachedPageLinks): void {
     );
   } catch (error) {
     console.error('Error writing page links cache:', error);
+  }
+}
+
+export function getCachedPageViews(title: string): number | null {
+  try {
+    const database = getDb();
+    const row = database.prepare(`
+      SELECT views, created_at
+      FROM page_views_cache
+      WHERE title = ?
+    `).get(normalizePageTitle(title)) as { views: number; created_at: string } | undefined;
+
+    if (!row || Date.now() - Date.parse(row.created_at) > PAGE_VIEWS_CACHE_TTL_MS) return null;
+    return Number.isFinite(row.views) ? row.views : 0;
+  } catch (error) {
+    console.error('Error reading page views cache:', error);
+    return null;
+  }
+}
+
+export function setCachedPageViews(title: string, views: number): void {
+  try {
+    const database = getDb();
+    database.prepare(`
+      INSERT OR REPLACE INTO page_views_cache (title, views, created_at)
+      VALUES (?, ?, ?)
+    `).run(normalizePageTitle(title), Math.max(0, Math.trunc(views)), new Date().toISOString());
+  } catch (error) {
+    console.error('Error writing page views cache:', error);
   }
 }
 

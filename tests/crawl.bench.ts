@@ -4,6 +4,8 @@ import { installMockMediaWiki } from './helpers/mockMediaWiki';
 vi.mock('../lib/db', () => ({
   getCachedPageLinks: vi.fn(() => null),
   setCachedPageLinks: vi.fn(),
+  getCachedPageViews: vi.fn(() => null),
+  setCachedPageViews: vi.fn(),
 }));
 
 import { buildGraph, crawlWikipedia } from '../lib/crawler';
@@ -12,6 +14,7 @@ import { analyzeGraph } from '../lib/graphAnalysis';
 interface BenchmarkRow {
   scenario: string;
   'API requests': number;
+  'pageview requests': number;
   'link rows downloaded': number;
   nodes: number;
   edges: number;
@@ -23,8 +26,8 @@ interface BenchmarkRow {
 
 const rows: BenchmarkRow[] = [];
 
-async function runScenario(scenario: string, depth: number, maxNodes: number): Promise<void> {
-  const mock = installMockMediaWiki();
+async function runScenario(scenario: string, depth: number, maxNodes: number, pageviewLatencyMs = 0): Promise<void> {
+  const mock = installMockMediaWiki({ pageviewLatencyMs });
   try {
     const crawlStart = performance.now();
     const result = await crawlWikipedia({ seedTitle: 'Page 0', depth, maxNodes });
@@ -41,6 +44,7 @@ async function runScenario(scenario: string, depth: number, maxNodes: number): P
     rows.push({
       scenario,
       'API requests': mock.stats.requests,
+      'pageview requests': mock.stats.pageviewRequests,
       'link rows downloaded': mock.stats.linkRowsDownloaded,
       nodes: result.nodes.length,
       edges: result.edges.length,
@@ -59,6 +63,7 @@ describe('crawl benchmark', () => {
     if (rows.length === 0) {
       await runScenario('default depth=3 maxNodes=500', 3, 500);
       await runScenario('default depth=2 maxNodes=150', 2, 150);
+      await runScenario('ranked depth=2 maxNodes=150 @ 200ms pageviews', 2, 150, 200);
     }
   }, { iterations: 1, warmupIterations: 0 });
 });

@@ -1,5 +1,5 @@
 import Graph from 'graphology';
-import { getPageLinksBatch, titleToUrl } from './wikipedia';
+import { getPageLinksBatch, getPageViews, titleToUrl } from './wikipedia';
 import { isJunkTitle } from './filters';
 import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
 
@@ -7,6 +7,19 @@ const WIKIPEDIA_BATCH_SIZE = 8;
 const MAX_CRAWL_CONCURRENCY = 6;
 const PAGE_LINK_LIMIT: number | undefined = undefined;
 const MAX_REQUEST_BUDGET = 500;
+
+function seededHash(seed: string, title: string): number {
+  let hash = 2166136261;
+  for (const character of `${seed}${title}`) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function isLowPriorityTitle(title: string): boolean {
+  return /^(?:List of |Index of |\d{4}$)/i.test(title);
+}
 
 interface CrawlState {
   nodes: WikiNode[];
@@ -104,10 +117,31 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   }
 
   let progressTarget = 1;
+  let lastProgressDone = -1;
   let activeWork = 0;
   let requestsUsed = 0;
   const configuredConcurrency = Number(process.env.CRAWL_CONCURRENCY ?? 4);
   const crawlConcurrency = Math.min(MAX_CRAWL_CONCURRENCY, Math.max(1, Math.trunc(configuredConcurrency) || 4));
+
+  const rankLayer = async (layer: { title: string; depth: number }[]): Promise<typeof layer> => {
+    if (layer.length <= 1) return layer;
+    const pageViews = await getPageViews(layer.map((item) => item.title), {
+      concurrency: crawlConcurrency,
+      beforeRequest: () => {
+        if (requestsUsed >= requestBudget) return false;
+        requestsUsed += 1;
+        return true;
+      },
+    });
+    return [...layer].sort((left, right) => {
+      const leftLowPriority = isLowPriorityTitle(left.title);
+      const rightLowPriority = isLowPriorityTitle(right.title);
+      if (leftLowPriority !== rightLowPriority) return leftLowPriority ? 1 : -1;
+      const viewDifference = (pageViews.get(right.title) ?? 0) - (pageViews.get(left.title) ?? 0);
+      if (viewDifference !== 0) return viewDifference;
+      return seededHash(seedNormalized, left.title) - seededHash(seedNormalized, right.title);
+    });
+  };
 
   const getNewAvailableEdges = (): WikiEdge[] => {
     const newEdges: WikiEdge[] = [];
@@ -131,10 +165,14 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
   const emitProgress = (complete = false) => {
     const done = progress.nodes.length;
-    const knownWork = done + activeWork + progress.queue.length;
+    const needsTerminalCorrection = progressTarget > done + 1 || requestsUsed >= requestBudget;
+    const wasAlreadyComplete = complete && lastProgressDone === done && !needsTerminalCorrection;
+    const knownWork = done + progress.queue.length;
     progressTarget = complete
       ? done
       : Math.min(maxNodes, Math.max(progressTarget, done, knownWork));
+    if (wasAlreadyComplete) return;
+    lastProgressDone = done;
     onProgress?.({ done, target: Math.max(progressTarget, done) });
   };
 
@@ -311,10 +349,15 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
   while (progress.queue.length > 0 && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
     const layerDepth = progress.queue[0].depth;
-    const layer = progress.queue.splice(0, progress.queue.length).filter((item) => item.depth === layerDepth);
+    const layer = await rankLayer(progress.queue.splice(0, progress.queue.length).filter((item) => item.depth === layerDepth));
+    const remainingNodeBudget = maxNodes - progress.nodes.length;
+    const layerQuota = depth >= 2 && layerDepth === 1
+      ? Math.min(remainingNodeBudget, Math.ceil(maxNodes * 0.4))
+      : remainingNodeBudget;
+    const admittedLayer = layer.slice(0, layerQuota);
     const batches: { title: string; depth: number }[][] = [];
-    for (let index = 0; index < layer.length; index += WIKIPEDIA_BATCH_SIZE) {
-      batches.push(layer.slice(index, index + WIKIPEDIA_BATCH_SIZE));
+    for (let index = 0; index < admittedLayer.length; index += WIKIPEDIA_BATCH_SIZE) {
+      batches.push(admittedLayer.slice(index, index + WIKIPEDIA_BATCH_SIZE));
     }
     activeWork = layer.length;
     let nextBatchIndex = 0;
@@ -345,9 +388,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   }
   onBatch?.([], edges.filter((edge) => !emittedEdgeKeys.has(`${edge.source}|${edge.target}`)));
 
-  if (progress.queue.length === 0) {
-    emitProgress(true);
-  }
+  emitProgress(true);
 
   // Calculate in-degrees
   const inDegreeMap = new Map<string, number>();

@@ -96,6 +96,66 @@ describe('layoutSeed', () => {
     expect(extent).toBeLessThan(5000);
     expect(average(intra) / average(inter)).toBeLessThan(0.5);
   });
+
+  it('separates weighted synthetic communities more than unweighted edges', () => {
+    const makeGraph = (weighted: boolean) => {
+      const graph = new Graph({ type: 'undirected' });
+      for (let community = 0; community < 4; community += 1) {
+        for (let index = 0; index < 4; index += 1) {
+          const angle = (index / 4) * Math.PI * 2;
+          graph.addNode(`${community}-${index}`, {
+            x: Math.cos(angle) * 8 + community * 30,
+            y: Math.sin(angle) * 8 + community * 24,
+            size: 1,
+            communityId: community,
+          });
+        }
+        for (let index = 0; index < 4; index += 1) {
+          graph.addEdge(`${community}-${index}`, `${community}-${(index + 1) % 4}`, { weight: 1 });
+        }
+      }
+      for (let community = 0; community < 4; community += 1) {
+        graph.addEdge(`${community}-0`, `${(community + 1) % 4}-0`, { weight: weighted ? 0.15 : 1 });
+      }
+      return graph;
+    };
+
+    const run = (weighted: boolean) => {
+      const graph = makeGraph(weighted);
+      forceAtlas2.assign(graph, {
+        iterations: 100,
+        settings: {
+          ...forceAtlas2.inferSettings(graph),
+          barnesHutOptimize: true,
+          scalingRatio: 10,
+          gravity: 0.5,
+          strongGravityMode: false,
+          slowDown: 5,
+          linLogMode: true,
+          outboundAttractionDistribution: true,
+          edgeWeightInfluence: 1,
+        },
+      });
+      const centroids = Array.from({ length: 4 }, (_, community) => {
+        const members = graph.nodes().filter((nodeId) => nodeId.startsWith(`${community}-`));
+        return members.reduce((sum, nodeId) => {
+          const position = graph.getNodeAttributes(nodeId);
+          return { x: sum.x + position.x, y: sum.y + position.y };
+        }, { x: 0, y: 0 });
+      }).map((sum) => ({ x: sum.x / 4, y: sum.y / 4 }));
+      const centroidDistance = centroids.reduce((sum, left, index) => (
+        sum + centroids.slice(index + 1).reduce((inner, right) => inner + Math.hypot(left.x - right.x, left.y - right.y), 0)
+      ), 0) / 6;
+      const withinRadius = graph.nodes().reduce((sum, nodeId) => {
+        const community = Number(nodeId.split('-')[0]);
+        const position = graph.getNodeAttributes(nodeId);
+        return sum + Math.hypot(position.x - centroids[community].x, position.y - centroids[community].y);
+      }, 0) / graph.order;
+      return centroidDistance / withinRadius;
+    };
+
+    expect(run(true)).toBeGreaterThan(run(false));
+  });
 });
 
 function distance(left: { x: number; y: number }, right: { x: number; y: number }): number {

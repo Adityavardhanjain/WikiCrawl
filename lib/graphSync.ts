@@ -2,6 +2,17 @@ import type Graph from 'graphology';
 import type { CrawlResult, WikiNode } from '@/types/graph';
 import { positionNearNeighbors } from './layoutSeed';
 
+export function computeEdgeWeight(
+  source: WikiNode,
+  target: WikiNode,
+  targetInDegree: number,
+  nodeCount: number,
+): number {
+  const communityWeight = source.communityId === target.communityId ? 1 : 0.15;
+  const hubWeight = targetInDegree > nodeCount * 0.35 ? 0.25 : 1;
+  return communityWeight * hubWeight;
+}
+
 export function mergeGraphData(base: CrawlResult, update: CrawlResult): CrawlResult {
   const nodes = new Map(base.nodes.map((node) => [node.id, node]));
   if (update.metrics) {
@@ -110,14 +121,24 @@ export function syncGraphData(
   }
 
   const incomingEdges = new Set<string>();
+  const inDegreeByNode = new Map<string, number>();
+  for (const edge of data.edges) {
+    inDegreeByNode.set(edge.target, (inDegreeByNode.get(edge.target) ?? 0) + 1);
+  }
+  const nodesById = new Map(data.nodes.map((node) => [node.id, node]));
   for (const edge of data.edges) {
     if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) continue;
     const key = `${edge.source}|${edge.target}`;
     incomingEdges.add(key);
+    const sourceNode = nodesById.get(edge.source);
+    const targetNode = nodesById.get(edge.target);
     graph.mergeEdge(edge.source, edge.target, {
       size: 0.8,
       color: 'rgba(148, 163, 184, 0.22)',
       type: 'line',
+      weight: sourceNode && targetNode
+        ? computeEdgeWeight(sourceNode, targetNode, inDegreeByNode.get(edge.target) ?? 0, data.nodes.length)
+        : 1,
     });
   }
 

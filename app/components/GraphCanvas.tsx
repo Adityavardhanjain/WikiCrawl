@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Graph from 'graphology';
 import { Sigma } from 'sigma';
 import { EdgeArrowProgram, EdgeLineProgram } from 'sigma/rendering';
@@ -8,6 +8,7 @@ import type { CrawlResult, WikiNode, PathResult } from '@/types/graph';
 import { getFocusCameraTarget } from '@/lib/cameraFocus';
 import { getCommunityColor, getNodeSize } from '@/lib/graphAnalysis';
 import { syncGraphData, updateGraphColors } from '@/lib/graphSync';
+import { computeRobustBounds } from '@/lib/layoutMetrics';
 import { seedInitialPositions } from '@/lib/layoutSeed';
 import { getRememberedPositions, useForceLayout } from './useForceLayout';
 import { useNodeSummary, usePrefetchNodeSummary } from './useNodeSummary';
@@ -20,6 +21,8 @@ interface GraphCanvasProps {
   onNodeClick: (node: WikiNode, shiftKey?: boolean) => void;
   focusedNode: string | null;
   path: PathResult | null;
+  isExpanded?: boolean;
+  focusedCommunityId?: number | null;
 }
 
 export function GraphCanvas({
@@ -28,6 +31,8 @@ export function GraphCanvas({
   onNodeClick,
   focusedNode,
   path,
+  isExpanded = false,
+  focusedCommunityId = null,
 }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef(new Graph({ type: 'directed', multi: false }));
@@ -55,6 +60,8 @@ export function GraphCanvas({
   const showArrowsRef = useRef(false);
   const pathNodeIdsRef = useRef(new Set<string>());
   const pathEdgeKeysRef = useRef(new Set<string>());
+  const communityNodeIdsRef = useRef(new Set<string>());
+  const focusedCommunityIdRef = useRef<number | null>(focusedCommunityId);
   const communityFrameRef = useRef<number | null>(null);
   const updateCommunityLabelsRef = useRef<() => void>(() => undefined);
   const pendingNewNodeIdsRef = useRef<string[]>([]);
@@ -104,13 +111,23 @@ export function GraphCanvas({
       return previousId < nodeId ? `${previousId}|${nodeId}` : `${nodeId}|${previousId}`;
     }) ?? [],
   ), [path]);
+  const communitiesSignature = useMemo(() => data.communities.length === 0
+    ? ''
+    : data.nodes.map((node) => `${node.id}:${node.communityId}`).sort().join('|'), [data.communities.length, data.nodes]);
+  const communityNodeIds = useMemo(() => new Set(
+    focusedCommunityId === null
+      ? []
+      : data.nodes.filter((node) => node.communityId === focusedCommunityId).map((node) => node.id),
+  ), [data.nodes, focusedCommunityId]);
   const edgeCount = data.edges.length;
-  const denseEdges = edgeCount > 5000;
+  const denseEdges = edgeCount > 4 * Math.max(data.nodes.length, 1);
   topRankIdsRef.current = topRankIds;
   hubIdsRef.current = hubIds;
   maxDegreeRef.current = maxDegree;
   pathNodeIdsRef.current = pathNodeIds;
   pathEdgeKeysRef.current = pathEdgeKeys;
+  communityNodeIdsRef.current = communityNodeIds;
+  focusedCommunityIdRef.current = focusedCommunityId;
   showAllEdgesRef.current = showAllEdges;
   showArrowsRef.current = showArrows;
 
@@ -140,7 +157,7 @@ export function GraphCanvas({
       minCameraRatio: 0.22,
       maxCameraRatio: 4,
       hideLabelsOnMove: true,
-      hideEdgesOnMove: dataRef.current.edges.length > 5000,
+      hideEdgesOnMove: dataRef.current.edges.length > 4 * Math.max(dataRef.current.nodes.length, 1),
       labelRenderedSizeThreshold: 6,
       nodeReducer: (node, nodeAttributes) => {
         const focusId = focusedNodeRef.current;
@@ -154,6 +171,8 @@ export function GraphCanvas({
         const isTopRanked = topRankIdsRef.current.has(node);
         const hasPath = pathNodeIdsRef.current.size > 0;
         const isPathNode = pathNodeIdsRef.current.has(node);
+        const hasCommunityFocus = focusedCommunityIdRef.current !== null;
+        const isCommunityMember = communityNodeIdsRef.current.has(node);
 
         if (hasPath && !isPathNode) {
           return {
@@ -174,6 +193,17 @@ export function GraphCanvas({
             label: nodeData.title,
             forceLabel: true,
             zIndex: 12,
+          };
+        }
+
+        if (hasCommunityFocus && !isCommunityMember) {
+          return {
+            ...nodeAttributes,
+            size: Math.max(5, (Number(nodeAttributes.size) || 8) * 0.76),
+            color: 'rgba(100, 116, 139, 0.24)',
+            label: '',
+            forceLabel: false,
+            zIndex: 1,
           };
         }
 
@@ -263,7 +293,7 @@ export function GraphCanvas({
         const isFocusedEdge = focusId === source || focusId === target;
         const isHoveredEdge = hoverId === source || hoverId === target;
         if (
-          dataRef.current.edges.length > 5000 &&
+          dataRef.current.edges.length > 4 * Math.max(dataRef.current.nodes.length, 1) &&
           !showAllEdgesRef.current &&
           !isFocusedEdge &&
           !isHoveredEdge &&
@@ -278,6 +308,7 @@ export function GraphCanvas({
         const edgeAlpha = 0.06 + 0.22 * Math.sqrt(
           Math.max(sourceData.inDegree + sourceData.outDegree, targetData.inDegree + targetData.outDegree) / maxDegreeRef.current,
         );
+        const normalEdgeAlpha = sourceData.communityId === targetData.communityId ? edgeAlpha : edgeAlpha * 0.5;
 
         if (isFocusedEdge) {
           return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(125, 211, 252, 0.8)', size: 1.6 };
@@ -291,7 +322,7 @@ export function GraphCanvas({
           return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: `rgba(148, 163, 184, ${edgeAlpha * 0.4})`, size: 0.45 };
         }
 
-        return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: `rgba(148, 163, 184, ${edgeAlpha})`, size: 0.8 };
+        return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: `rgba(148, 163, 184, ${normalEdgeAlpha})`, size: 0.8 };
       },
       edgeProgramClasses: {
         line: EdgeLineProgram,
@@ -401,6 +432,17 @@ export function GraphCanvas({
     };
   }, []);
 
+  const applyRobustBounds = useCallback((fitCamera = false) => {
+    const sigma = sigmaRef.current;
+    if (!sigma) return;
+    const points = graphRef.current.nodes().map((node) => {
+      const attributes = graphRef.current.getNodeAttributes(node);
+      return { x: Number(attributes.x), y: Number(attributes.y) };
+    });
+    sigma.setCustomBBox(computeRobustBounds(points));
+    if (fitCamera) sigma.getCamera().animatedReset({ duration: 420 });
+  }, []);
+
   useEffect(() => {
     const graph = graphRef.current;
     hoveredNodeRef.current = null;
@@ -432,14 +474,17 @@ export function GraphCanvas({
     sigmaRef.current?.refresh();
     updateCommunityLabelsRef.current();
     if (result.shouldFitCamera) {
-      sigmaRef.current?.getCamera().animatedReset({ duration: 420 });
+      sigmaRef.current?.setCustomBBox(null);
+      applyRobustBounds(true);
     }
-  }, [data, edgeCount, maxDegree, maxDepth, rankValues]);
+  }, [applyRobustBounds, data, edgeCount, maxDegree, maxDepth, rankValues]);
 
   const { arranging, paused, togglePause } = useForceLayout(graphRef.current, {
     seedId: data.seedId,
-    changeKey: `${data.seedId}:${data.nodes.length}:${data.edges.length}:${layoutRevision}`,
+    changeKey: `${data.seedId}:${data.nodes.length}:${data.edges.length}:${layoutRevision}:${!isExpanded ? communitiesSignature : ''}`,
     newNodeIds: pendingNewNodeIdsRef.current,
+    relayoutAll: !isExpanded && Boolean(communitiesSignature),
+    onLayoutStop: applyRobustBounds,
   });
 
   useEffect(() => {
@@ -518,6 +563,34 @@ export function GraphCanvas({
   useEffect(() => {
     sigmaRef.current?.refresh();
   }, [focusedNode]);
+
+  useEffect(() => {
+    if (!sigmaRef.current || focusedCommunityId === null) return;
+    const displays = data.nodes
+      .filter((node) => node.communityId === focusedCommunityId)
+      .map((node) => getFocusCameraTarget(sigmaRef.current?.getNodeDisplayData(node.id)))
+      .filter((display): display is { x: number; y: number } => display !== null);
+    if (displays.length === 0) return;
+
+    const bounds = displays.reduce((current, display) => ({
+      minX: Math.min(current.minX, display.x),
+      maxX: Math.max(current.maxX, display.x),
+      minY: Math.min(current.minY, display.y),
+      maxY: Math.max(current.maxY, display.y),
+    }), {
+      minX: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    });
+    const spread = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, 0.08);
+    const ratio = Math.min(4, Math.max(0.22, spread * 1.35));
+    sigmaRef.current.getCamera().animate({
+      x: (bounds.minX + bounds.maxX) / 2,
+      y: (bounds.minY + bounds.maxY) / 2,
+      ratio,
+    }, { duration: 420 });
+  }, [data.nodes, focusedCommunityId]);
 
   const resetLayout = () => {
     const graph = graphRef.current;

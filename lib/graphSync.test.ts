@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import Graph from 'graphology';
 import type { CrawlResult, WikiNode } from '@/types/graph';
-import { mergeGraphData, syncGraphData, updateGraphColors } from './graphSync';
+import { computeEdgeWeight, mergeGraphData, syncGraphData, updateGraphColors } from './graphSync';
 
 function node(id: string, depth = 1): WikiNode {
   return {
@@ -35,6 +35,24 @@ const options = {
 };
 
 describe('syncGraphData', () => {
+  it('computes weaker weights for cross-community and hub targets', () => {
+    const source = node('source');
+    const target = { ...node('target'), communityId: 1 };
+    expect(computeEdgeWeight(source, source, 0, 10)).toBe(1);
+    expect(computeEdgeWeight(source, target, 0, 10)).toBe(0.15);
+    expect(computeEdgeWeight(source, source, 4, 10)).toBe(0.25);
+    expect(computeEdgeWeight(source, target, 4, 10)).toBe(0.15 * 0.25);
+  });
+
+  it('updates weights on existing edges when analysis communities change', () => {
+    const graph = new Graph({ type: 'directed' });
+    syncGraphData(graph, data([node('seed'), node('new')], [{ source: 'seed', target: 'new' }]), options);
+    expect(graph.getEdgeAttribute('seed', 'new', 'weight')).toBe(0.25);
+
+    syncGraphData(graph, data([node('seed'), { ...node('new'), communityId: 1 }], [{ source: 'seed', target: 'new' }]), options);
+    expect(graph.getEdgeAttribute('seed', 'new', 'weight')).toBe(0.15 * 0.25);
+  });
+
   it('preserves existing edges when merging an expansion result', () => {
     const base = data(
       [node('seed'), node('old'), node('new')],

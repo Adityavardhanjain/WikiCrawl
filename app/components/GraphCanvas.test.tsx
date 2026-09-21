@@ -21,6 +21,7 @@ vi.mock('sigma', () => ({
     }
     getNodeDisplayData() { return undefined; }
     getDimensions() { return { width: 800, height: 600 }; }
+    setCustomBBox() {}
     refresh() {}
     getContainer() { return document.createElement('div'); }
     setSetting() {}

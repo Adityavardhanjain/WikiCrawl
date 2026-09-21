@@ -189,6 +189,7 @@ export default function Home() {
   const [reduceEffects, setReduceEffects] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
+  const [focusedCommunityId, setFocusedCommunityId] = useState<number | null>(null);
   const [pathSelection, setPathSelection] = useState<{ from: string; to: string; result: PathResult | null } | null>(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
@@ -329,7 +330,10 @@ export default function Home() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPathSelection(null);
+      if (event.key === 'Escape') {
+        setPathSelection(null);
+        setFocusedCommunityId(null);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -456,11 +460,13 @@ export default function Home() {
         result: pathfinder.findPath(selectedNodeId, node.id),
       });
       setFocusedNode(null);
+      setFocusedCommunityId(null);
       return;
     }
 
     setSelectedNodeId(node.id);
     setFocusedNode(node.id);
+    setFocusedCommunityId(null);
     setPathSelection(null);
     setGraphError(null);
     setCrawlWarning(null);
@@ -470,16 +476,19 @@ export default function Home() {
     setSelectedNodeId(from);
     setPathSelection({ from, to, result: pathfinder.findPath(from, to) });
     setFocusedNode(null);
+    setFocusedCommunityId(null);
   }, [pathfinder]);
 
   const handlePathNodeClick = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
     setFocusedNode(null);
+    setFocusedCommunityId(null);
   }, []);
 
   // Handle node selection from sidebar
   const handleNodeSelect = useCallback((nodeId: string) => {
     setFocusedNode(nodeId);
+    setFocusedCommunityId(null);
     const node = displayData?.nodes.find(n => n.id === nodeId);
     if (node) {
       setSelectedNodeId(node.id);
@@ -489,11 +498,14 @@ export default function Home() {
   // Handle community selection
   const handleCommunitySelect = useCallback((communityId: number) => {
     if (!displayData) return;
-    const firstNode = displayData.nodes.find(n => n.communityId === communityId);
-    if (firstNode) {
-      setFocusedNode(firstNode.id);
-    }
-  }, [displayData]);
+    const community = displayData.communities.find((candidate) => candidate.id === communityId);
+    const topPage = community?.topPages[0]
+      ? displayData.nodes.find((node) => node.id === community.topPages[0])
+      : null;
+    setFocusedCommunityId(communityId);
+    setFocusedNode(null);
+    setSelectedNodeId(topPage?.id ?? null);
+  }, [displayData, setFocusedCommunityId]);
 
   // Handle expand from node
   const handleExpand = useCallback((nodeId: string) => {
@@ -507,6 +519,7 @@ export default function Home() {
   const handleCloseSelection = useCallback(() => {
     setSelectedNodeId(null);
     setFocusedNode(null);
+    setFocusedCommunityId(null);
     setPathSelection(null);
   }, []);
 
@@ -745,7 +758,9 @@ export default function Home() {
                 colorMode={colorMode}
                 onNodeClick={handleNodeClick}
                 focusedNode={focusedNode}
+                                focusedCommunityId={focusedCommunityId}
                 path={pathSelection?.result ?? null}
+                isExpanded={expandedNodeIds.size > 0}
               />
               
               <MemoizedNodeDetailPanel
@@ -857,7 +872,7 @@ export default function Home() {
             <button type="button" className="mobile-sidebar-toggle atlas-mobile-button" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen((open) => !open)}>
               {sidebarOpen ? 'Close atlas' : 'Open atlas'}
             </button>
-            <MemoizedSidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+            <MemoizedSidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} focusedCommunityId={focusedCommunityId} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
           </>
         )}
       </div>

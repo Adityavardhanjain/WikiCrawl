@@ -10,19 +10,35 @@ interface SidebarProps {
   onNodeSelect: (nodeId: string) => void;
   onCommunitySelect: (communityId: number) => void;
   focusedNode: string | null;
+  focusedCommunityId?: number | null;
   isOpen?: boolean;
   onClose?: () => void;
 }
 
-function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, isOpen = false, onClose = () => undefined }: SidebarProps) {
-  const [activeTab, setActiveTab] = useState<'pagerank' | 'communities'>('pagerank');
+function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, focusedCommunityId = null, isOpen = false, onClose = () => undefined }: SidebarProps) {
+  const [activeTab, setActiveTab] = useState<'pagerank' | 'bridges' | 'communities'>('pagerank');
+  const [filterQuery, setFilterQuery] = useState('');
   const selectedNode = data.nodes.find((node) => node.id === focusedNode) ?? null;
   const meaningfulCommunities = data.communities.filter((community) => community.size > 1);
   
   const topPages = useMemo(
-    () => [...data.nodes].sort((a, b) => b.pagerank - a.pagerank).slice(0, 10),
-    [data.nodes]
+    () => [...data.nodes]
+      .filter((node) => !filterQuery || node.title.toLocaleLowerCase().includes(filterQuery.toLocaleLowerCase()))
+      .sort((a, b) => b.pagerank - a.pagerank)
+      .slice(0, 10),
+    [data.nodes, filterQuery]
   );
+  const bridges = useMemo(
+    () => [...data.nodes]
+      .filter((node) => node.id !== data.seedId)
+      .filter((node) => !filterQuery || node.title.toLocaleLowerCase().includes(filterQuery.toLocaleLowerCase()))
+      .sort((a, b) => b.betweenness - a.betweenness)
+      .slice(0, 10),
+    [data.nodes, data.seedId, filterQuery],
+  );
+  const maxPageRank = useMemo(() => Math.max(...data.nodes.map((node) => node.pagerank), 0), [data.nodes]);
+  const maxBetweenness = useMemo(() => Math.max(...data.nodes.map((node) => node.betweenness), 0), [data.nodes]);
+  const filterNodes = activeTab === 'bridges' ? bridges : topPages;
 
   const connectedPages = useMemo(() => {
     if (!selectedNode) return [];
@@ -31,7 +47,7 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, isOpen = 
       .map((nodeId) => nodesById.get(nodeId))
       .filter((node): node is typeof data.nodes[number] => Boolean(node))
       .slice(0, 8);
-  }, [data.edges, data.nodes, selectedNode]);
+  }, [data, selectedNode]);
 
   return (
     <aside className={`atlas-sidebar mobile-sheet reduce-effects w-80 glass-strong border-l border-white/10 flex flex-col overflow-hidden ${isOpen ? 'mobile-sheet-open' : ''}`}>
@@ -74,6 +90,7 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, isOpen = 
         <button
           type="button"
           aria-label="Show top pages"
+          aria-pressed={activeTab === 'pagerank'}
           onClick={() => setActiveTab('pagerank')}
           className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
             activeTab === 'pagerank'
@@ -90,10 +107,22 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, isOpen = 
         </button>
         <button
           type="button"
+          aria-label="Show bridges"
+          aria-pressed={activeTab === 'bridges'}
+          onClick={() => setActiveTab('bridges')}
+          className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
+            activeTab === 'bridges' ? 'text-white bg-gradient-to-b from-cyan-500/20 to-transparent' : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          Bridges
+        </button>
+        <button
+          type="button"
           aria-label="Show clusters"
+          aria-pressed={activeTab === 'communities'}
           onClick={() => setActiveTab('communities')}
           disabled={meaningfulCommunities.length === 0}
-          className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
+          className={`flex-1 px-4 py-3 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
             activeTab === 'communities'
               ? 'text-white bg-gradient-to-b from-purple-500/20 to-transparent'
               : 'text-slate-400 hover:text-white hover:bg-white/5'
@@ -110,11 +139,32 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, isOpen = 
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-3">
-        {activeTab === 'pagerank' ? (
-          <div className="space-y-1">
-            {topPages.map((node, index) => (
+        {activeTab !== 'communities' ? (
+          <>
+            <label htmlFor="sidebar-node-filter" className="mb-2 block text-xs font-medium uppercase tracking-wide text-atlas-muted">
+              Filter pages
+            </label>
+            <input
+              id="sidebar-node-filter"
+              type="search"
+              value={filterQuery}
+              onChange={(event) => setFilterQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setFilterQuery('');
+                if (event.key === 'Enter' && filterNodes[0]) onNodeSelect(filterNodes[0].id);
+              }}
+              placeholder="Search this graph"
+              className="mb-3 w-full rounded border border-white/10 bg-white/5 px-2.5 py-2 text-sm text-white placeholder:text-atlas-dim"
+            />
+            <div className="space-y-1">
+            {filterNodes.map((node, index) => {
+              const value = activeTab === 'bridges' ? node.betweenness : node.pagerank;
+              const maximum = activeTab === 'bridges' ? maxBetweenness : maxPageRank;
+              return (
               <button
                 key={node.id}
+                type="button"
+                aria-pressed={focusedNode === node.id}
                 onClick={() => onNodeSelect(node.id)}
                 className={`w-full text-left px-3 py-3 rounded-xl mb-1 transition-all group ${
                   focusedNode === node.id
@@ -123,38 +173,30 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, isOpen = 
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
-                    index === 0 ? 'bg-yellow-500/20 text-yellow-400' :
-                    index === 1 ? 'bg-slate-400/20 text-slate-300' :
-                    index === 2 ? 'bg-orange-600/20 text-orange-400' :
-                    'bg-slate-700/50 text-atlas-dim'
-                  }`}>
-                    {index + 1}
-                  </span>
-                  <span className="flex-1 truncate text-sm font-medium">{node.title}</span>
-                  {node.id === data.seedId && (
-                    <span className="text-[10px] bg-gradient-to-r from-yellow-500/20 to-orange-500/20 text-yellow-400 px-2 py-0.5 rounded-full">
-                      Seed
-                    </span>
+                  {activeTab === 'pagerank' && (
+                    <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold bg-slate-700/50 text-atlas-dim">{index + 1}</span>
                   )}
+                  <span className="flex-1 truncate text-sm font-medium">{node.title}</span>
+                  {node.id === data.seedId && <span className="text-[10px] text-yellow-400">Seed</span>}
                 </div>
                 <div className="mt-2 flex items-center gap-2">
                   <div className="flex-1 h-1 bg-slate-700 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full transition-all"
-                      style={{ width: `${Math.min(100, node.pagerank * 1000)}%` }}
-                    />
+                    <div className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full transition-all" style={{ width: `${maximum > 0 ? (value / maximum) * 100 : 0}%` }} />
                   </div>
-                  <span className="text-[10px] opacity-60">{node.pagerank.toFixed(3)}</span>
+                  <span className="text-[10px] opacity-60">{value.toFixed(3)}</span>
                 </div>
               </button>
-            ))}
-          </div>
+              );
+            })}
+            </div>
+          </>
         ) : (
           <div className="space-y-1">
             {meaningfulCommunities.slice(0, 15).map((community) => (
               <button
                 key={community.id}
+                type="button"
+                aria-pressed={focusedCommunityId === community.id}
                 onClick={() => onCommunitySelect(community.id)}
                 className="w-full text-left px-3 py-3 rounded-xl mb-1 hover:bg-white/5 text-slate-300 transition-all group card-hover"
               >

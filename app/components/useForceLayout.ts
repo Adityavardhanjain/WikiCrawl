@@ -16,20 +16,24 @@ interface UseForceLayoutOptions {
   seedId: string;
   changeKey: string;
   newNodeIds: string[];
+  relayoutAll?: boolean;
+  onLayoutStop?: () => void;
 }
 
 export function useForceLayout(
   graph: Graph,
-  { seedId, changeKey, newNodeIds }: UseForceLayoutOptions,
+  { seedId, changeKey, newNodeIds, relayoutAll = false, onLayoutStop }: UseForceLayoutOptions,
 ): { arranging: boolean; paused: boolean; togglePause: () => void } {
   const layoutRef = useRef<FA2Layout | null>(null);
   const seedRef = useRef<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const newNodeIdsRef = useRef(newNodeIds);
+  const onLayoutStopRef = useRef(onLayoutStop);
   const [arranging, setArranging] = useState(false);
   const [paused, setPaused] = useState(false);
 
   newNodeIdsRef.current = newNodeIds;
+  onLayoutStopRef.current = onLayoutStop;
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -48,7 +52,7 @@ export function useForceLayout(
     // The installed worker reads `fixed` into its node matrix and skips those
     // nodes during force application, so existing nodes remain stable here.
     graph.forEachNode((node) => {
-      graph.setNodeAttribute(node, 'fixed', isNewSeed ? false : !newIds.has(node));
+      graph.setNodeAttribute(node, 'fixed', isNewSeed || relayoutAll ? false : !newIds.has(node));
     });
 
     timerRef.current = setTimeout(() => {
@@ -60,6 +64,9 @@ export function useForceLayout(
           gravity: 0.5,
           strongGravityMode: false,
           slowDown: 5,
+          linLogMode: true,
+          outboundAttractionDistribution: true,
+          edgeWeightInfluence: 1,
         },
       });
       layoutRef.current = layout;
@@ -76,7 +83,8 @@ export function useForceLayout(
           }),
         ));
         setArranging(false);
-      }, 2500);
+        onLayoutStopRef.current?.();
+      }, 3000);
     }, 400);
 
     return () => {
@@ -84,7 +92,7 @@ export function useForceLayout(
       layoutRef.current?.kill();
       layoutRef.current = null;
     };
-  }, [changeKey, graph, seedId]);
+  }, [changeKey, graph, relayoutAll, seedId]);
 
   const togglePause = () => {
     const layout = layoutRef.current;

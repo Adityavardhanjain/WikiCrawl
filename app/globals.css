@@ -875,3 +875,78 @@ body {
   .app-header .flex.items-center.justify-between { align-items: flex-start; gap: 1rem; }
   .app-header .relative.flex.items-center.gap-1 { flex-shrink: 0; }
 }
+
+/* Creation state: a quiet workbench, not a blocking error/loading screen. */
+.creation-stage {
+  background: rgba(16, 19, 17, 0.58);
+  backdrop-filter: blur(5px);
+}
+
+.creation-card {
+  position: relative;
+  padding: 2rem 2.25rem;
+  background: rgba(23, 27, 24, 0.94);
+  border: 1px solid rgba(233, 229, 216, 0.18);
+  border-left: 3px solid var(--signal);
+  box-shadow: 12px 12px 0 rgba(255, 118, 95, 0.18), 0 24px 60px rgba(0, 0, 0, 0.24);
+}
+
+.creation-card-mark {
+  position: absolute;
+  top: 1.75rem;
+  right: 2rem;
+  color: var(--signal);
+  font: 500 0.72rem var(--font-mono), monospace;
+  letter-spacing: 0.08em;
+}
+
+.creation-kicker,
+.creation-stage-label {
+  color: var(--atlas-muted);
+  font: 500 0.68rem var(--font-mono), monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.creation-card h3 {
+  margin-top: 0.45rem;
+  color: var(--paper);
+  font-size: clamp(1.6rem, 4vw, 2.35rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.creation-stage-label {
+  margin-top: 1.25rem;
+  color: var(--signal);
+  letter-spacing: 0.04em;
+}
+
+.creation-progress {
+  height: 0.35rem;
+  margin-top: 1rem;
+  overflow: hidden;
+  background: rgba(233, 229, 216, 0.12);
+}
+
+.creation-progress span {
+  display: block;
+  height: 100%;
+  background: var(--signal);
+  transition: width 240ms ease-out;
+}
+
+.creation-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  color: var(--atlas-dim);
+  font-size: 0.72rem;
+}
+
+@media (max-width: 700px) {
+  .creation-card { padding: 1.5rem; }
+  .creation-card-mark { top: 1.5rem; right: 1.5rem; }
+  .creation-meta { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
+}

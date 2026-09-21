@@ -308,6 +308,13 @@ export default function Home() {
 
   const displayData = data ?? liveData ?? previousDataRef.current;
   const displayProgress = toDisplayProgress(isLoading, loadingProgress);
+  const creationStage = !displayData
+    ? 'Opening a new trail'
+    : liveData && liveData.nodes.length < 2
+      ? 'Finding the first links'
+      : liveData && liveData.communities.length === 0
+        ? 'Tracing connections'
+        : 'Arranging the neighborhoods';
   const crawlStatus = error
     ? `Crawl error: ${error instanceof Error ? error.message : 'unable to load pages'}`
     : isLoading
@@ -652,15 +659,18 @@ export default function Home() {
         {/* Graph area */}
         <div className="flex-1 relative">
           {isLoading && !displayData && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-950/90 z-50 backdrop-blur-sm">
-              <div className="text-center">
-                <div className="loading-spinner mx-auto mb-6" />
-                <h3 className="text-2xl font-bold text-white mb-2">Crawling Wikipedia</h3>
-                <p className="text-cyan-400 animate-pulse">Discovering connections...</p>
-                <div className="mt-6 flex justify-center gap-2">
-                  <div className="w-2 h-2 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <div className="creation-stage absolute inset-0 flex items-center justify-center px-6 z-50">
+              <div className="creation-card w-full max-w-lg">
+                <div className="creation-card-mark" aria-hidden="true">{'///'}</div>
+                <p className="creation-kicker">New field note</p>
+                <h3>Building your map</h3>
+                <p className="creation-stage-label">{creationStage}</p>
+                <div className="creation-progress" aria-hidden="true">
+                  <span style={{ width: `${displayProgress * 100}%` }} />
+                </div>
+                <div className="creation-meta">
+                  <span>{Math.round(displayProgress * 100)}% mapped</span>
+                  <span>Depth {depth} · up to {maxNodes} pages</span>
                 </div>
               </div>
             </div>
@@ -669,7 +679,7 @@ export default function Home() {
           {isLoading && displayData && (
             <div className="absolute inset-x-4 top-4 z-30 flex justify-center">
               <div className="flex items-center gap-3 rounded-full border border-cyan-500/30 bg-slate-950/80 px-4 py-2 text-xs text-cyan-200 shadow-lg backdrop-blur-md">
-                <span>Exploring a new neighborhood...</span>
+                <span>{creationStage}</span>
                 <span className="w-24 text-right tabular-nums transition-opacity duration-300">{Math.round(displayProgress * 100)}%</span>
                 <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/80">
                   <span

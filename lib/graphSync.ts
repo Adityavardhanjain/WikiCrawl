@@ -44,6 +44,7 @@ export function mergeGraphData(base: CrawlResult, update: CrawlResult): CrawlRes
 interface GraphNodeAttributes {
   x: number;
   y: number;
+  fixed: boolean;
   size: number;
   color: string;
   label: string;
@@ -107,6 +108,7 @@ export function syncGraphData(
     graph.mergeNode(node.id, {
       x: position.x,
       y: position.y,
+      fixed: false,
       size,
       color,
       label: node.title,

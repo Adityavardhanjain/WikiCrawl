@@ -462,10 +462,8 @@ export function GraphCanvas({
     focusNeighborsRef.current = focusedNodeRef.current && graph.hasNode(focusedNodeRef.current)
       ? new Set(graph.neighbors(focusedNodeRef.current))
       : new Set();
-    const shapeChanged = previousShapeRef.current.seedId !== data.seedId
-      || previousShapeRef.current.nodes !== data.nodes.length
-      || previousShapeRef.current.edges !== edgeCount;
-    if (shapeChanged || result.addedNodeIds.length > 0 || result.seedChanged) {
+    const isFirstGraphSync = previousShapeRef.current.nodes === 0 && data.nodes.length > 0;
+    if (isFirstGraphSync || result.seedChanged) {
       pendingNewNodeIdsRef.current = result.seedChanged ? data.nodes.map((node) => node.id) : result.addedNodeIds;
       setLayoutRevision((revision) => revision + 1);
     }
@@ -481,7 +479,7 @@ export function GraphCanvas({
 
   const { arranging, paused, togglePause } = useForceLayout(graphRef.current, {
     seedId: data.seedId,
-    changeKey: `${data.seedId}:${data.nodes.length}:${data.edges.length}:${layoutRevision}:${!isExpanded ? communitiesSignature : ''}`,
+    changeKey: `${data.seedId}:${layoutRevision}:${!isExpanded ? communitiesSignature : ''}`,
     newNodeIds: pendingNewNodeIdsRef.current,
     relayoutAll: !isExpanded && Boolean(communitiesSignature),
     onLayoutStop: applyRobustBounds,

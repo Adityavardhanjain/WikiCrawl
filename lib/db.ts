@@ -1,6 +1,11 @@
-import Database from 'better-sqlite3';
+import { createRequire } from 'node:module';
 import path from 'path';
 import type { CrawlResult } from '@/types/graph';
+
+type BetterSqlite3 = typeof import('better-sqlite3');
+type Database = InstanceType<BetterSqlite3>;
+
+const require = createRequire(import.meta.url);
 
 const DB_PATH = path.join(process.cwd(), 'wiki-crawl.db');
 const RESOLVED_DB_PATH = process.env.WIKICRAWL_DB_PATH
@@ -18,7 +23,8 @@ export interface CachedPageLinks {
   complete: boolean;
 }
 
-let db: Database.Database | null = null;
+let db: Database | null = null;
+let DatabaseConstructor: BetterSqlite3 | null = null;
 let dbFailureUntil = 0;
 
 interface MemoryEntry<T> {
@@ -67,12 +73,13 @@ function rememberDbFailure(error: unknown): void {
   console.warn(`[WikiCrawl] SQLite cache unavailable for 60s; using in-memory fallback: ${reason}`);
 }
 
-function getDb(): Database.Database | null {
+function getDb(): Database | null {
   if (db) return db;
   if (dbFailureUntil > Date.now()) return null;
 
   try {
-    db = new Database(RESOLVED_DB_PATH);
+    DatabaseConstructor ??= require('better-sqlite3') as BetterSqlite3;
+    db = new DatabaseConstructor(RESOLVED_DB_PATH);
     db.pragma('journal_mode = WAL');
     
     // Create tables if they don't exist

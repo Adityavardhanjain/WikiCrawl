@@ -623,7 +623,7 @@ export function GraphCanvas({
   };
 
   return (
-    <div className="relative w-full h-full min-h-0">
+    <div className="relative w-full h-full min-h-[320px]">
       <div ref={containerRef} className="graph-surface absolute inset-0 w-full h-full" />
 
       <div

@@ -71,8 +71,11 @@ export async function POST(request: NextRequest) {
 
     const stream = new ReadableStream({
       async start(controller) {
+        let crawlProgress: CrawlProgress = { done: 0, target: 1 };
+        const heartbeat = setInterval(() => {
+          sendStreamEvent(controller, 'progress', { progress: crawlProgress });
+        }, 2000);
         try {
-          let crawlProgress: CrawlProgress = { done: 0, target: 1 };
           const { nodes: crawledNodes, edges: crawledEdges, seedId: crawledSeedId, partial, failedTitles } = await crawlWikipedia({
             seedTitle,
             depth: validatedDepth,
@@ -155,8 +158,10 @@ export async function POST(request: NextRequest) {
             setCachedResult(cacheKey, seedTitle, validatedDepth, validatedMaxNodes, result);
           }
           sendStreamEvent(controller, 'done', { result });
+          clearInterval(heartbeat);
           closeStream(controller);
         } catch (error) {
+          clearInterval(heartbeat);
           console.error('Crawl error:', error);
           sendStreamEvent(controller, 'error', {
             error: 'Failed to crawl Wikipedia',

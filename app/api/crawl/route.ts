@@ -14,9 +14,22 @@ export const maxDuration = 60;
 const encoder = new TextEncoder();
 
 function sendStreamEvent(controller: ReadableStreamDefaultController, event: string, payload: unknown) {
-  controller.enqueue(
-    encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`)
-  );
+  try {
+    controller.enqueue(
+      encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`)
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function closeStream(controller: ReadableStreamDefaultController): void {
+  try {
+    controller.close();
+  } catch {
+    // The client may have disconnected before the crawl completed.
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -142,14 +155,14 @@ export async function POST(request: NextRequest) {
             setCachedResult(cacheKey, seedTitle, validatedDepth, validatedMaxNodes, result);
           }
           sendStreamEvent(controller, 'done', { result });
-          controller.close();
+          closeStream(controller);
         } catch (error) {
           console.error('Crawl error:', error);
           sendStreamEvent(controller, 'error', {
             error: 'Failed to crawl Wikipedia',
             details: String(error),
           });
-          controller.close();
+          closeStream(controller);
         }
       },
     });

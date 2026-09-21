@@ -67,6 +67,7 @@ export function GraphCanvas({
   const pendingNewNodeIdsRef = useRef<string[]>([]);
   const previousShapeRef = useRef({ seedId: '', nodes: 0, edges: 0 });
   const [layoutRevision, setLayoutRevision] = useState(0);
+  const [containerReady, setContainerReady] = useState(false);
   const [showAllEdges, setShowAllEdges] = useState(false);
   const [showArrows, setShowArrows] = useState(false);
   const [communityLabels, setCommunityLabels] = useState<Array<{
@@ -143,8 +144,23 @@ export function GraphCanvas({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const mountContainer = containerRef.current;
+    if (mountContainer.clientHeight === 0 || mountContainer.clientWidth === 0) {
+      if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(() => {
+          if (mountContainer.clientHeight > 0 && mountContainer.clientWidth > 0) {
+            setContainerReady(true);
+          }
+        });
+        observer.observe(mountContainer);
+        return () => observer.disconnect();
+      }
+      const frame = window.requestAnimationFrame(() => setContainerReady(true));
+      return () => window.cancelAnimationFrame(frame);
+    }
+
     const graph = graphRef.current;
-    const sigma = new Sigma(graph, containerRef.current, {
+    const sigma = new Sigma(graph, mountContainer, {
       renderLabels: true,
       labelFont: 'var(--font-display)',
       labelSize: 12,
@@ -430,7 +446,7 @@ export function GraphCanvas({
       sigma.kill();
       sigmaRef.current = null;
     };
-  }, []);
+  }, [containerReady]);
 
   const applyRobustBounds = useCallback((fitCamera = false) => {
     const sigma = sigmaRef.current;

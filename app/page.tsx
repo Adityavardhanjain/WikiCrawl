@@ -639,9 +639,9 @@ export default function Home() {
       </header>
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden relative z-10">
+      <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden relative z-10">
         {/* Graph area */}
-        <div className="flex-1 relative">
+        <div className="flex-1 min-h-0 min-w-0 relative">
           {isLoading && !displayData && (
             <div className="creation-stage absolute inset-0 flex items-center justify-center px-6 z-50">
               <div className="creation-card w-full max-w-lg">

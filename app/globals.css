@@ -945,6 +945,64 @@ body {
   font-size: 0.72rem;
 }
 
+/* Attached-style network logo. */
+.brand-lockup {
+  display: inline-grid;
+  align-items: center;
+  color: #f8fafc;
+}
+
+.brand-lockup-mark .brand-network-mark {
+  width: 2.6rem;
+  height: 2.2rem;
+  color: #e2e8f0;
+}
+
+.brand-lockup-wordmark {
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 0.75rem;
+}
+
+.brand-lockup-wordmark .brand-network-mark {
+  grid-row: 1 / span 2;
+  width: 3.4rem;
+  height: 2.7rem;
+  color: #dbeafe;
+}
+
+.brand-wordmark {
+  color: #f8fafc;
+  font: 500 1rem var(--font-display), sans-serif;
+  letter-spacing: 0.25em;
+  white-space: nowrap;
+}
+
+.brand-tagline {
+  color: #94a3b8;
+  font: 400 0.52rem var(--font-display), sans-serif;
+  letter-spacing: 0.36em;
+  white-space: nowrap;
+}
+
+.brand-mark-nodes circle:last-child { color: #6ea8ff; }
+
+@media (prefers-color-scheme: light) {
+  .brand-lockup,
+  .brand-wordmark { color: #0f172a; }
+  .brand-lockup-mark .brand-network-mark,
+  .brand-lockup-wordmark .brand-network-mark { color: #172554; }
+  .brand-wordmark { color: #0f172a; }
+  .brand-tagline { color: #475569; }
+  .brand-mark-nodes circle:last-child { color: #315ed8; }
+}
+
+@media (max-width: 700px) {
+  .brand-wordmark { font-size: 0.84rem; }
+  .brand-tagline { display: none; }
+  .brand-lockup-wordmark .brand-network-mark { width: 2.8rem; height: 2.3rem; }
+}
+
 @media (max-width: 700px) {
   .creation-card { padding: 1.5rem; }
   .creation-card-mark { top: 1.5rem; right: 1.5rem; }

@@ -4,6 +4,7 @@ import { memo, useMemo, useState } from 'react';
 import type { CrawlResult } from '@/types/graph';
 import { getCommunityColor } from '@/lib/graphAnalysis';
 import { buildAdjacency } from '@/lib/adjacency';
+import { BrandMark } from './BrandMark';
 
 interface SidebarProps {
   data: CrawlResult;
@@ -55,13 +56,7 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, focusedCo
       <div className="px-4 py-4 border-b border-white/10">
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
-          <div className="atlas-brand-mark w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-500 p-[2px]">
-            <div className="atlas-brand-inner w-full h-full bg-slate-900 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
-              </svg>
-            </div>
-          </div>
+          <BrandMark />
           <div>
             <h2 className="text-lg font-bold text-white">WikiCrawl</h2>
             <p className="text-xs text-atlas-muted">Atlas of Wikipedia knowledge</p>

@@ -43,6 +43,7 @@ export function GraphCanvas({
   const tooltipPositionRef = useRef({ x: 0, y: 0 });
   const tooltipFrameRef = useRef<number | null>(null);
   const focusedNodeRef = useRef(focusedNode);
+  const cameraReturnStateRef = useRef<{ x: number; y: number; ratio: number; angle: number } | null>(null);
   const hoveredNodeRef = useRef<string | null>(null);
   const focusNeighborsRef = useRef(new Set<string>());
   const hoverNeighborsRef = useRef(new Set<string>());
@@ -467,14 +468,24 @@ export function GraphCanvas({
     if (!sigmaRef.current || !focusedNode) return;
 
     const camera = sigmaRef.current.getCamera();
+    if (!cameraReturnStateRef.current) cameraReturnStateRef.current = camera.getState();
     const display = sigmaRef.current.getNodeDisplayData(focusedNode);
     const target = getFocusCameraTarget(display);
     if (target) camera.animate(target, { duration: 300 });
   }, [focusedNode]);
 
   useEffect(() => {
+    if (focusedNode || path || !cameraReturnStateRef.current || !sigmaRef.current) return;
+    const camera = sigmaRef.current.getCamera();
+    camera.animate(cameraReturnStateRef.current, { duration: 300 });
+    cameraReturnStateRef.current = null;
+  }, [focusedNode, path]);
+
+  useEffect(() => {
     if (!sigmaRef.current || !path || path.path.length === 0) return;
 
+    const camera = sigmaRef.current.getCamera();
+    if (!cameraReturnStateRef.current) cameraReturnStateRef.current = camera.getState();
     const positions = path.path
       .map((nodeId) => sigmaRef.current?.getNodeDisplayData(nodeId))
       .filter((display) => getFocusCameraTarget(display) !== null)
@@ -501,7 +512,7 @@ export function GraphCanvas({
     const fitWidth = Math.max(width, height * viewportAspect);
     const ratio = Math.min(4, Math.max(0.22, fitWidth * 1.35));
 
-    sigmaRef.current.getCamera().animate({ x: centerX, y: centerY, ratio }, { duration: 420 });
+    camera.animate({ x: centerX, y: centerY, ratio }, { duration: 420 });
   }, [path]);
 
   useEffect(() => {

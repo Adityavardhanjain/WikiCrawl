@@ -3,6 +3,7 @@ import { getCachedPageLinks, getCachedPageViews, setCachedPageLinks, setCachedPa
 const WIKIPEDIA_API_BASE = 'https://en.wikipedia.org/w/api.php';
 const USER_AGENT = 'WikiCrawl/1.0 (https://github.com/WikiCrawl)';
 const MAX_RETRIES = 3;
+const PAGEVIEW_TIMEOUT_MS = 5000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -48,7 +49,7 @@ interface WikipediaResponse {
 
 async function fetchWikipedia(
   params: Record<string, string>,
-  beforeRequest?: () => boolean,
+  options: { beforeRequest?: () => boolean; maxRetries?: number; timeoutMs?: number } = {},
 ): Promise<WikipediaResponse> {
   const url = new URL(WIKIPEDIA_API_BASE);
   url.searchParams.set('format', 'json');
@@ -60,17 +61,26 @@ async function fetchWikipedia(
 
   let attempt = 0;
 
-  while (attempt <= MAX_RETRIES) {
-    if (beforeRequest && !beforeRequest()) throw new Error('Wikipedia request budget exhausted');
-    const response = await fetch(url.toString(), {
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: 'application/json',
-      },
-    });
+  const maxRetries = options.maxRetries ?? MAX_RETRIES;
+  while (attempt <= maxRetries) {
+    if (options.beforeRequest && !options.beforeRequest()) throw new Error('Wikipedia request budget exhausted');
+    const controller = options.timeoutMs ? new AbortController() : undefined;
+    const timeout = options.timeoutMs ? setTimeout(() => controller?.abort(), options.timeoutMs) : undefined;
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'application/json',
+        },
+        signal: controller?.signal,
+      });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
 
     if (response.status === 429) {
-      if (attempt >= MAX_RETRIES) {
+      if (attempt >= maxRetries) {
         throw new Error('Wikipedia is rate limiting requests. Please wait a moment and try again.');
       }
 
@@ -267,7 +277,7 @@ export async function getPageViews(
         prop: 'pageviews',
         pvipdays: '30',
         redirects: '1',
-      }, options.beforeRequest);
+      }, { beforeRequest: options.beforeRequest, maxRetries: 0, timeoutMs: PAGEVIEW_TIMEOUT_MS });
       const pages = data.query?.pages ?? [];
       const redirects = data.query?.redirects ?? [];
       const redirectMap = new Map(redirects.map((redirect) => [redirect.from || redirect.title || '', redirect.to]));

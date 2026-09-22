@@ -452,6 +452,7 @@ export default function Home() {
     submittedRequestRef.current = request;
     setSubmittedRequest(request);
     setLiveData(null);
+    setExpandedNodeIds(new Set());
     setLoadingProgress(0);
     setGraphError(null);
     setCrawlWarning(null);

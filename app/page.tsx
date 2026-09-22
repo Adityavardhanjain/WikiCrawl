@@ -200,7 +200,7 @@ export default function Home() {
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null);
   const [expandNotice, setExpandNotice] = useState<string | null>(null);
-  const liveUpdateRef = useRef<((current: CrawlResult) => CrawlResult) | null>(null);
+  const liveUpdateRef = useRef<{ nonce: number; update: (current: CrawlResult) => CrawlResult } | null>(null);
   const liveUpdateFrameRef = useRef<number | null>(null);
   const submittedRequestRef = useRef<CrawlRequest | null>(null);
   const requestNonceRef = useRef(0);
@@ -212,22 +212,26 @@ export default function Home() {
   }, []);
 
   const mergeLiveData = useCallback((request: CrawlRequest, update: (current: CrawlResult) => CrawlResult) => {
-    const pendingUpdate = liveUpdateRef.current;
-    liveUpdateRef.current = pendingUpdate
-      ? (current) => update(pendingUpdate(current))
-      : update;
+    const pending = liveUpdateRef.current;
+    if (!pending || request.nonce > pending.nonce) {
+      liveUpdateRef.current = { nonce: request.nonce, update };
+    } else if (pending.nonce === request.nonce) {
+      liveUpdateRef.current = { nonce: request.nonce, update: (current) => update(pending.update(current)) };
+    }
+    // Updates from an older crawl request are never composed or queued.
 
     if (liveUpdateFrameRef.current !== null) return;
 
     liveUpdateFrameRef.current = window.requestAnimationFrame(() => {
-      const pendingUpdate = liveUpdateRef.current;
+      const pending = liveUpdateRef.current;
       liveUpdateRef.current = null;
       liveUpdateFrameRef.current = null;
-      if (!pendingUpdate || submittedRequestRef.current?.nonce !== request.nonce) return;
+      const activeRequest = submittedRequestRef.current;
+      if (!pending || !activeRequest || activeRequest.nonce !== pending.nonce) return;
 
-      setLiveData((current) => pendingUpdate(current ?? {
+      setLiveData((current) => pending.update(current ?? {
         id: 'streaming',
-        seedId: request.seed,
+        seedId: activeRequest.seed,
         nodes: [],
         edges: [],
         communities: [],

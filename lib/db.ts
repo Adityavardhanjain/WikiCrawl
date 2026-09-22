@@ -231,12 +231,35 @@ export function getCachedResult(cacheKey: string): CrawlResult | null {
     const database = getDb();
     if (!database) return null;
     const row = database.prepare(
-      'SELECT result FROM crawl_cache WHERE id = ?'
-    ).get(cacheKey) as { result: string } | undefined;
-    
-    if (row) {
-      return JSON.parse(row.result) as CrawlResult;
-    }
+  'SELECT result, created_at FROM crawl_cache WHERE id = ?'
+).get(cacheKey) as {
+  result: string;
+  created_at: string;
+} | undefined;
+
+if (!row) {
+  return null;
+}
+
+const createdAt = Date.parse(row.created_at);
+
+if (!Number.isFinite(createdAt)) {
+  database.prepare(
+    'DELETE FROM crawl_cache WHERE id = ?'
+  ).run(cacheKey);
+
+  return null;
+}
+
+if (Date.now() - createdAt >= CRAWL_RESULT_CACHE_TTL_MS) {
+  database.prepare(
+    'DELETE FROM crawl_cache WHERE id = ?'
+  ).run(cacheKey);
+
+  return null;
+}
+
+return JSON.parse(row.result) as CrawlResult;
     return null;
   } catch (error) {
     rememberDbFailure(error);
@@ -254,7 +277,7 @@ export function setCachedResult(
   try {
     const database = getDb();
     if (!database) {
-      memoryResults.set(cacheKey, result, PAGE_LINKS_CACHE_TTL_MS);
+      memoryResults.set(cacheKey, result, CRAWL_RESULT_CACHE_TTL_MS);
       return;
     }
     database.prepare(`
@@ -270,7 +293,7 @@ export function setCachedResult(
     );
   } catch (error) {
     rememberDbFailure(error);
-    memoryResults.set(cacheKey, result, PAGE_LINKS_CACHE_TTL_MS);
+    memoryResults.set(cacheKey, result, CRAWL_RESULT_CACHE_TTL_MS);
   }
 }
 

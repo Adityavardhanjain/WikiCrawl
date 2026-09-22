@@ -182,20 +182,38 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     const batchTitles = batch.map(({ title }) => title);
     const paginationSessionId = randomUUID();
     const fetchBatch = async (titles: string[], continueToken?: string) => {
-      if (requestsUsed >= requestBudget) return null;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
+  if (requestsUsed >= requestBudget) return null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await getPageLinksBatch(titles, continueToken, {
+        paginationSessionId,
+        beforeRequest: () => {
+          if (requestsUsed >= requestBudget) {
+            return false;
+          }
+
           requestsUsed += 1;
-          return await getPageLinksBatch(titles, continueToken, {
-            paginationSessionId,
-          });
-        } catch {
-          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 50));
-        }
+          return true;
+        },
+      });
+    } catch {
+      if (requestsUsed >= requestBudget) {
+        break;
       }
-      for (const title of batchTitles) progress.failedTitles.add(title);
-      return null;
-    };
+
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+  }
+
+  for (const title of batchTitles) {
+    progress.failedTitles.add(title);
+  }
+
+  return null;
+};
 
     const batchResponse = await fetchBatch(batchTitles);
     if (!batchResponse) {

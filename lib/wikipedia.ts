@@ -200,7 +200,12 @@ export async function getPageLinksBatch(
     params.plcontinue = continueToken;
   }
 
-  const data = await fetchWikipedia(params);
+  const data = await fetchWikipedia(
+  params,
+  {
+    beforeRequest: options.beforeRequest,
+  }
+);
   
   const pages = data.query?.pages || [];
   const redirects = data.query?.redirects || [];

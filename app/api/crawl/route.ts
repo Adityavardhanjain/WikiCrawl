@@ -10,7 +10,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Assumes a Vercel plan that permits 60 seconds for this Node.js function.
 export const maxDuration = 60;
-
+const MAX_EXPAND_KNOWN_NODES = 500;
+const MAX_EXPAND_KNOWN_EDGES = 50_000;
+const MAX_EXPAND_NODE_ID_LENGTH = 512;
 const encoder = new TextEncoder();
 
 function sendStreamEvent(controller: ReadableStreamDefaultController, event: string, payload: unknown) {
@@ -46,6 +48,69 @@ export async function POST(request: NextRequest) {
 
     const isExpand = Array.isArray(knownNodeIds);
     const knownIds = knownNodeIds ?? [];
+    if (isExpand) {
+  if (
+    knownIds.length === 0 ||
+    knownIds.length > MAX_EXPAND_KNOWN_NODES
+  ) {
+    return NextResponse.json(
+      { error: 'Invalid expansion node count' },
+      { status: 400 }
+    );
+  }
+
+  if (
+    !Array.isArray(knownEdgeIndexPairs) ||
+    knownEdgeIndexPairs.length > MAX_EXPAND_KNOWN_EDGES
+  ) {
+    return NextResponse.json(
+      { error: 'Invalid expansion edge count' },
+      { status: 400 }
+    );
+  }
+
+  const uniqueNodeIds = new Set<string>();
+
+  for (const id of knownIds) {
+    if (
+      typeof id !== 'string' ||
+      id.trim().length === 0 ||
+      id.length > MAX_EXPAND_NODE_ID_LENGTH
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid expansion node id' },
+        { status: 400 }
+      );
+    }
+
+    if (uniqueNodeIds.has(id)) {
+      return NextResponse.json(
+        { error: 'Duplicate expansion node id' },
+        { status: 400 }
+      );
+    }
+
+    uniqueNodeIds.add(id);
+  }
+
+  for (const pair of knownEdgeIndexPairs) {
+    if (
+      !Array.isArray(pair) ||
+      pair.length !== 2 ||
+      !Number.isInteger(pair[0]) ||
+      !Number.isInteger(pair[1]) ||
+      pair[0] < 0 ||
+      pair[1] < 0 ||
+      pair[0] >= knownIds.length ||
+      pair[1] >= knownIds.length
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid expansion edge index' },
+        { status: 400 }
+      );
+    }
+  }
+}
     const validatedBaseDepth = Math.min(Math.max(Math.trunc(baseDepth || 0), 0), 3);
 
     const validatedDepth = Math.min(Math.max(depth || 2, 1), 3);

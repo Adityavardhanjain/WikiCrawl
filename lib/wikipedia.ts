@@ -215,39 +215,67 @@ export async function getPageLinksBatch(
   const redirectMap = new Map(redirects.map((redirect) => [redirect.from || redirect.title || '', redirect.to]));
 
   const nextPageId = continuationPageId(data['continue']?.plcontinue);
-  const fetchedPages = missingTitles.map((title) => {
-    const resolvedTitle = redirectMap.get(title) || title;
-    const normalizedResolvedTitle = resolvedTitle.toLowerCase();
-    const normalizedTitle = title.toLowerCase();
-    const page = pages.find((candidate) => (
-      (candidate.title.toLowerCase() === normalizedResolvedTitle || candidate.title.toLowerCase() === normalizedTitle)
-    ));
+const hasContinuation = Boolean(data['continue']?.plcontinue);
 
-    if (!page || page.missing) {
-      return { title, resolvedTitle: title, links: [], complete: true, missing: true };
-    }
+const fetchedPages = missingTitles.map((title) => {
+  const resolvedTitle = redirectMap.get(title) || title;
+  const normalizedResolvedTitle = resolvedTitle.toLowerCase();
+  const normalizedTitle = title.toLowerCase();
 
-    const pageLinks = page.links?.map((link) => link.title) || [];
-    const key = getAccumulationKey(paginationSessionId, title);
-    const accumulated = accumulatedPages.get(key) ?? {
-      resolvedTitle: page.title || resolvedTitle,
-      links: []
-    };
-    accumulatedPages.set(key, accumulated);
-    for (const link of pageLinks) {
-      if (!accumulated.links.includes(link)) accumulated.links.push(link);
-    }
-    accumulated.resolvedTitle = page.title || resolvedTitle;
-    accumulatedPages.set(key, accumulated);
+  const page = pages.find((candidate) => (
+    candidate.title.toLowerCase() === normalizedResolvedTitle ||
+    candidate.title.toLowerCase() === normalizedTitle
+  ));
 
+  if (!page || page.missing) {
     return {
       title,
-      resolvedTitle: page.title || resolvedTitle,
-      links: pageLinks,
-      pageid: page.pageid,
-      complete: !data['continue']?.plcontinue || (nextPageId !== undefined && page.pageid !== undefined && nextPageId > page.pageid),
+      resolvedTitle: title,
+      links: [],
+      complete: true,
+      missing: true,
     };
-  });
+  }
+
+  const pageLinks = page.links?.map((link) => link.title) || [];
+
+  const key = getAccumulationKey(
+    paginationSessionId,
+    title,
+  );
+
+  const accumulated = accumulatedPages.get(key) ?? {
+    resolvedTitle: page.title || resolvedTitle,
+    links: [],
+  };
+
+  for (const link of pageLinks) {
+    if (!accumulated.links.includes(link)) {
+      accumulated.links.push(link);
+    }
+  }
+
+  accumulated.resolvedTitle = page.title || resolvedTitle;
+  accumulatedPages.set(key, accumulated);
+
+  // MediaWiki's continuation token identifies the page whose
+  // link listing should continue. If it points at this page,
+  // this page is not complete yet.
+  const continuationTargetsPage =
+    nextPageId !== undefined &&
+    page.pageid !== undefined &&
+    nextPageId === page.pageid;
+
+  const complete = !hasContinuation || !continuationTargetsPage;
+
+  return {
+    title,
+    resolvedTitle: page.title || resolvedTitle,
+    links: pageLinks,
+    pageid: page.pageid,
+    complete,
+  };
+});
 
 for (let index = 0; index < fetchedPages.length; index += 1) {
   const page = fetchedPages[index];

@@ -96,6 +96,52 @@ describe('offline crawler', () => {
     }
   });
 
+  it('combines all paginated links for a redirected page and caches the complete result', async () => {
+  const mock = installMockMediaWiki();
+  const paginationSessionId = 'redirect-pagination-test';
+
+  try {
+    const firstPage = await getPageLinksBatch(
+      ['Redirect 0'],
+      undefined,
+      { paginationSessionId },
+    );
+
+    expect(firstPage.pages[0]?.resolvedTitle).toBe('Page 0');
+    expect(firstPage.pages[0]?.links).toHaveLength(500);
+    expect(firstPage.pages[0]?.complete).toBe(false);
+    expect(firstPage.continueToken).toBe('500');
+
+    const secondPage = await getPageLinksBatch(
+      ['Redirect 0'],
+      firstPage.continueToken,
+      { paginationSessionId },
+    );
+
+    expect(secondPage.pages[0]?.resolvedTitle).toBe('Page 0');
+    expect(secondPage.pages[0]?.links).toHaveLength(150);
+    expect(secondPage.pages[0]?.complete).toBe(true);
+    expect(secondPage.continueToken).toBeUndefined();
+
+    // The completed page should now be available from cache as one
+    // complete 650-link result, not just the final 150 links.
+    const cachedPage = await getPageLinksBatch(
+      ['Redirect 0'],
+      undefined,
+      { paginationSessionId: 'cache-verification' },
+    );
+
+    expect(cachedPage.pages[0]?.resolvedTitle).toBe('Page 0');
+    expect(cachedPage.pages[0]?.complete).toBe(true);
+    expect(cachedPage.pages[0]?.links).toHaveLength(650);
+    expect(new Set(cachedPage.pages[0]?.links).size).toBe(650);
+
+    expect(mock.stats.linkRowsDownloaded).toBe(650);
+  } finally {
+    mock.restore();
+  }
+});
+
   it('does not paginate satisfied pages in a mixed batch', async () => {
     const mock = installMockMediaWiki();
 

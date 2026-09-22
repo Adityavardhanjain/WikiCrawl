@@ -1,7 +1,10 @@
 import { getCachedPageLinks, getCachedPageViews, setCachedPageLinks, setCachedPageViews } from './db';
 
 const WIKIPEDIA_API_BASE = 'https://en.wikipedia.org/w/api.php';
-const USER_AGENT = 'WikiCrawl/1.0 (https://github.com/WikiCrawl)';
+const WIKI_CONTACT = process.env.WIKI_CONTACT?.trim();
+const USER_AGENT = WIKI_CONTACT
+  ? `WikiCrawl/1.0 (https://github.com/Adityavardhanjain/WikiCrawl; ${WIKI_CONTACT})`
+  : 'WikiCrawl/1.0 (https://github.com/Adityavardhanjain/WikiCrawl)';
 const MAX_RETRIES = 3;
 const PAGEVIEW_TIMEOUT_MS = 5000;
 

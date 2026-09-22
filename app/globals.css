@@ -5,14 +5,12 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+.app-fonts {
   --cyan-glow: #06b6d4;
   --purple-glow: #8b5cf6;
   --pink-glow: #ec4899;
   --accent: #06b6d4;
-}
-
-.app-fonts {
   --font-display: "Space Grotesk", "Inter", "Segoe UI", Arial, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }

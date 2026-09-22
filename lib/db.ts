@@ -12,6 +12,7 @@ const RESOLVED_DB_PATH = process.env.WIKICRAWL_DB_PATH
   || (process.env.VERCEL ? '/tmp/wiki-crawl.db' : DB_PATH);
 const PAGE_LINKS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PAGE_VIEWS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const CRAWL_RESULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const DB_FAILURE_COOLDOWN_MS = 60 * 1000;
 const MEMORY_PAGE_LINKS_LIMIT = 500;
 const MEMORY_RESULTS_LIMIT = 20;

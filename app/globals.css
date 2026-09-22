@@ -1,3 +1,6 @@
+@import "@fontsource/space-grotesk/latin.css";
+@import "@fontsource/ibm-plex-mono/latin.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

@@ -380,9 +380,20 @@ export default function Home() {
       }
       return { nodeId, result };
     },
-    onSuccess: ({ nodeId, result }) => {
-      setExpandedNodeIds((current) => new Set(current).add(nodeId));
-      setExpandNotice(result.nodes.length === 0 ? `No new pages found from "${nodeId}".` : null);
+   onSuccess: ({ nodeId, result }) => {
+  if (!result.partial) {
+    setExpandedNodeIds((current) => {
+      const next = new Set(current);
+      next.add(nodeId);
+      return next;
+    });
+  }
+
+  setExpandNotice(
+    result.nodes.length === 0
+      ? `No new pages found from "${nodeId}".`
+      : null
+  );
       if (displayData && submittedRequest) {
         const queryKey = ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce];
         const currentData = queryClient.getQueryData<CrawlResult>(queryKey) ?? displayData;

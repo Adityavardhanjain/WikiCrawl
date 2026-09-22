@@ -137,7 +137,14 @@ export interface PageViewsOptions {
   beforeRequest?: () => boolean;
 }
 
-const accumulatedPages = new Map<string, { resolvedTitle: string; links: string[] }>();
+const accumulatedPages = new Map<string, {
+  resolvedTitle: string;
+  links: string[];
+}>();
+
+function getAccumulationKey(sessionId: string, title: string): string {
+  return `${sessionId}:${normalizeTitle(title)}`;
+}
 
 function normalizeTitle(title: string): string {
   return title.replace(/_/g, ' ').trim().toLowerCase();
@@ -148,15 +155,22 @@ function continuationPageId(token?: string): number | undefined {
   return Number.isFinite(pageId) ? pageId : undefined;
 }
 
+export interface PageLinksBatchOptions {
+  beforeRequest?: () => boolean;
+  paginationSessionId?: string;
+}
+
 export async function getPageLinksBatch(
   titles: string[],
-  continueToken?: string
+  continueToken?: string,
+  options: PageLinksBatchOptions = {},
 ): Promise<PageLinksBatchResult> {
   if (titles.length === 0) {
     return { pages: [] };
   }
 
   const requestedTitles = titles.slice(0, MAX_BATCH_TITLES);
+  const paginationSessionId = options.paginationSessionId ?? 'default';
   const cachedPages = new Map<string, PageLinksResult>();
   const missingTitles = requestedTitles.filter((title) => {
     if (continueToken) return true;
@@ -206,8 +220,12 @@ export async function getPageLinksBatch(
     }
 
     const pageLinks = page.links?.map((link) => link.title) || [];
-    const key = normalizeTitle(title);
-    const accumulated = accumulatedPages.get(key) ?? { resolvedTitle: page.title || resolvedTitle, links: [] };
+    const key = getAccumulationKey(paginationSessionId, title);
+    const accumulated = accumulatedPages.get(key) ?? {
+      resolvedTitle: page.title || resolvedTitle,
+      links: []
+    };
+    accumulatedPages.set(key, accumulated);
     for (const link of pageLinks) {
       if (!accumulated.links.includes(link)) accumulated.links.push(link);
     }
@@ -223,18 +241,41 @@ export async function getPageLinksBatch(
     };
   });
 
-  for (const page of fetchedPages) {
-    if (!page.missing && page.complete) {
-      const accumulated = accumulatedPages.get(normalizeTitle(page.title));
-      setCachedPageLinks({
-        title: page.title,
-        resolvedTitle: accumulated?.resolvedTitle ?? page.resolvedTitle,
-        links: accumulated?.links ?? page.links,
-        complete: true,
-      });
-      accumulatedPages.delete(normalizeTitle(page.title));
-    }
+for (let index = 0; index < fetchedPages.length; index += 1) {
+  const page = fetchedPages[index];
+  const requestedTitle = missingTitles[index];
+
+  if (!page || !requestedTitle || page.missing || !page.complete) {
+    continue;
   }
+
+  const key = getAccumulationKey(
+    paginationSessionId,
+    requestedTitle
+  );
+
+  const accumulated = accumulatedPages.get(key);
+
+  const cachedPage: PageLinksResult = {
+    title: page.title,
+    resolvedTitle: accumulated?.resolvedTitle ?? page.resolvedTitle,
+    links: accumulated?.links ?? page.links,
+    complete: true,
+  };
+
+  setCachedPageLinks(cachedPage);
+
+  // Also cache the redirect alias so requesting the original
+  // redirect title can hit the cache next time.
+  if (normalizeTitle(requestedTitle) !== normalizeTitle(page.title)) {
+    setCachedPageLinks({
+      ...cachedPage,
+      title: requestedTitle,
+    });
+  }
+
+  accumulatedPages.delete(key);
+}
 
   return {
     pages: requestedTitles.map((title) => cachedPages.get(title) || fetchedPages.find((page) => page.title === title)!).filter(Boolean),

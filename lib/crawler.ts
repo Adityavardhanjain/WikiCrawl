@@ -2,6 +2,7 @@ import Graph from 'graphology';
 import { getPageLinksBatch, getPageViews, titleToUrl } from './wikipedia';
 import { isJunkTitle } from './filters';
 import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
+import { randomUUID } from 'node:crypto';
 
 const WIKIPEDIA_BATCH_SIZE = 8;
 const MAX_CRAWL_CONCURRENCY = 6;
@@ -179,12 +180,15 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   const processBatch = async (batch: { title: string; depth: number }[]) => {
 
     const batchTitles = batch.map(({ title }) => title);
+    const paginationSessionId = randomUUID();
     const fetchBatch = async (titles: string[], continueToken?: string) => {
       if (requestsUsed >= requestBudget) return null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           requestsUsed += 1;
-          return await getPageLinksBatch(titles, continueToken);
+          return await getPageLinksBatch(titles, continueToken, {
+            paginationSessionId,
+          });
         } catch {
           if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 50));
         }

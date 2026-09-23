@@ -7,10 +7,10 @@ import { SeedSearch } from './SeedSearch';
 function mockFetchJson(results: { title: string }[]) {
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockResolvedValue({
+    vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => Promise.resolve({
       ok: true,
       json: async () => results,
-    }),
+    })),
   );
 }
 

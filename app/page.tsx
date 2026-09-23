@@ -258,7 +258,7 @@ export default function Home() {
     queryKey: submittedRequest
       ? ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce]
       : ['crawl', 'idle'],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!submittedRequest) throw new Error('No crawl request submitted');
       const request = submittedRequest;
       const isCurrentRequest = () => submittedRequestRef.current?.nonce === request.nonce;
@@ -268,6 +268,7 @@ export default function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(getCrawlPayload(request)),
+          signal,
         });
         const result = await readCrawlResponse(
           response,
@@ -394,7 +395,7 @@ export default function Home() {
 
   // Expand mutation
   const expandMutation = useMutation({
-    mutationFn: async (nodeId: string) => {
+    mutationFn: async (nodeId: string, { signal }: { signal: AbortSignal }) => {
       if (!displayData) throw new Error('No graph data available to expand.');
       if (!submittedRequest) throw new Error('No active crawl request.');
       const nonce = submittedRequest.nonce;
@@ -405,6 +406,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildExpandRequestBody(nodeId, currentData, currentDepth, currentMaxNodes)),
+        signal,
       });
 
       const result = await readCrawlResponse(response);
@@ -439,6 +441,10 @@ export default function Home() {
       }
     },
     onError: (error) => {
+      if (error instanceof Error && error.name === 'AbortError') {
+        // Don't show error for aborted expand requests
+        return;
+      }
       setGraphError(error instanceof Error ? error.message : 'Could not explore this page.');
     },
     onSettled: () => {

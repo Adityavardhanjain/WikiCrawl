@@ -65,7 +65,7 @@ describe('Home live crawl streaming', () => {
     frameCallbacks.clear();
     nextFrameId = 0;
     crawlChannels = [];
-    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/wikipedia/search')) {
         return Promise.resolve(Response.json([]));

@@ -74,6 +74,8 @@ export interface CrawlOptions {
   baseDepth?: number;
   onProgress?: (progress: CrawlProgress) => void;
   onBatch?: (nodes: WikiNode[], edges: WikiEdge[]) => void;
+  /** AbortSignal for cancellation */
+  signal?: AbortSignal;
 }
 
 export async function crawlWikipedia(options: CrawlOptions): Promise<{
@@ -83,7 +85,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   partial: boolean;
   failedTitles: string[];
 }> {
-  const { seedTitle, depth, maxNodes, knownIds = [], baseDepth = 0, onProgress, onBatch } = options;
+  const { seedTitle, depth, maxNodes, knownIds = [], baseDepth = 0, onProgress, onBatch, signal } = options;
   const requestBudget = getCrawlRequestBudget(maxNodes, depth);
   const progress: CrawlState = {
     nodes: [],
@@ -129,7 +131,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     const pageViews = await getPageViews(layer.map((item) => item.title), {
       concurrency: crawlConcurrency,
       beforeRequest: () => {
-        if (requestsUsed >= requestBudget) return false;
+        if (signal?.aborted || requestsUsed >= requestBudget) return false;
         requestsUsed += 1;
         return true;
       },
@@ -182,38 +184,45 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     const batchTitles = batch.map(({ title }) => title);
     const paginationSessionId = randomUUID();
     const fetchBatch = async (titles: string[], continueToken?: string) => {
-  if (requestsUsed >= requestBudget) return null;
+      if (signal?.aborted || requestsUsed >= requestBudget) return null;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      return await getPageLinksBatch(titles, continueToken, {
-        paginationSessionId,
-        beforeRequest: () => {
-          if (requestsUsed >= requestBudget) {
-            return false;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          return await getPageLinksBatch(titles, continueToken, {
+            paginationSessionId,
+            beforeRequest: () => {
+              if (signal?.aborted || requestsUsed >= requestBudget) {
+                return false;
+              }
+
+              requestsUsed += 1;
+              return true;
+            },
+          });
+        } catch {
+          if (signal?.aborted || requestsUsed >= requestBudget) {
+            break;
           }
 
-          requestsUsed += 1;
-          return true;
-        },
-      });
-    } catch {
-      if (requestsUsed >= requestBudget) {
-        break;
+          if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+        }
       }
 
-      if (attempt === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
+      if (signal?.aborted) {
+        for (const title of batchTitles) {
+          progress.failedTitles.add(title);
+        }
+        return null;
       }
-    }
-  }
 
-  for (const title of batchTitles) {
-    progress.failedTitles.add(title);
-  }
+      for (const title of batchTitles) {
+        progress.failedTitles.add(title);
+      }
 
-  return null;
-};
+      return null;
+    };
 
     const batchResponse = await fetchBatch(batchTitles);
     if (!batchResponse) {
@@ -370,6 +379,10 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   };
 
   while (progress.queue.length > 0 && progress.nodes.length < maxNodes && requestsUsed < requestBudget) {
+    if (signal?.aborted) {
+      throw new Error('Crawl aborted');
+    }
+    
     const layerDepth = progress.queue[0].depth;
     const layer = await rankLayer(progress.queue.splice(0, progress.queue.length).filter((item) => item.depth === layerDepth));
     const remainingNodeBudget = maxNodes - progress.nodes.length;
@@ -379,12 +392,15 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     const admittedLayer = layer.slice(0, layerQuota);
     const batches: { title: string; depth: number }[][] = [];
     for (let index = 0; index < admittedLayer.length; index += WIKIPEDIA_BATCH_SIZE) {
-      batches.push(admittedLayer.slice(index, index + WIKIPEDIA_BATCH_SIZE));
+      batches.push(admittedLayer.slice(index, index + WIKIPEDA_BATCH_SIZE));
     }
     activeWork = layer.length;
     let nextBatchIndex = 0;
     const workers = Array.from({ length: Math.min(crawlConcurrency, batches.length) }, async () => {
       while (nextBatchIndex < batches.length && requestsUsed < requestBudget) {
+        if (signal?.aborted) {
+          throw new Error('Crawl aborted');
+        }
         await processBatch(batches[nextBatchIndex++]);
       }
     });

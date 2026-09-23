@@ -228,6 +228,7 @@ export async function POST(request: NextRequest) {
             maxNodes: validatedMaxNodes,
             knownIds,
             baseDepth: validatedBaseDepth,
+            signal: request.signal,
             onProgress: (progress) => {
               crawlProgress = progress;
               sendStreamEvent(controller, 'progress', { progress: crawlProgress });

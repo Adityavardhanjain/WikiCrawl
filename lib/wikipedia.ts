@@ -52,7 +52,7 @@ interface WikipediaResponse {
 
 async function fetchWikipedia(
   params: Record<string, string>,
-  options: { beforeRequest?: () => boolean; maxRetries?: number; timeoutMs?: number } = {},
+  options: { beforeRequest?: () => boolean; maxRetries?: number; timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<WikipediaResponse> {
   const url = new URL(WIKIPEDIA_API_BASE);
   url.searchParams.set('format', 'json');
@@ -67,6 +67,8 @@ async function fetchWikipedia(
   const maxRetries = options.maxRetries ?? MAX_RETRIES;
   while (attempt <= maxRetries) {
     if (options.beforeRequest && !options.beforeRequest()) throw new Error('Wikipedia request budget exhausted');
+    if (options.signal?.aborted) throw new Error('Wikipedia request aborted');
+    
     const controller = options.timeoutMs ? new AbortController() : undefined;
     const timeout = options.timeoutMs ? setTimeout(() => controller?.abort(), options.timeoutMs) : undefined;
     let response: Response;
@@ -76,7 +78,7 @@ async function fetchWikipedia(
           'User-Agent': USER_AGENT,
           Accept: 'application/json',
         },
-        signal: controller?.signal,
+        signal: controller?.signal ?? options.signal,
       });
     } finally {
       if (timeout) clearTimeout(timeout);
@@ -138,6 +140,7 @@ const MAX_BATCH_TITLES = 50;
 export interface PageViewsOptions {
   concurrency?: number;
   beforeRequest?: () => boolean;
+  signal?: AbortSignal;
 }
 
 const accumulatedPages = new Map<string, {
@@ -161,6 +164,7 @@ function continuationPageId(token?: string): number | undefined {
 export interface PageLinksBatchOptions {
   beforeRequest?: () => boolean;
   paginationSessionId?: string;
+  signal?: AbortSignal;
 }
 
 export async function getPageLinksBatch(

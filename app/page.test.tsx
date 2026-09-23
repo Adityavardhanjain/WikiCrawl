@@ -103,11 +103,14 @@ describe('Home live crawl streaming', () => {
     vi.unstubAllGlobals();
   });
 
-  function runPendingFrames() {
-    const callbacks = [...frameCallbacks.values()];
-    frameCallbacks.clear();
+function runPendingFrames() {
+  const callbacks = [...frameCallbacks.values()];
+  frameCallbacks.clear();
+
+  act(() => {
     for (const callback of callbacks) callback(0);
-  }
+  });
+}
 
   it('never applies a stale crawl stream update queued around a newer crawl', async () => {
     window.history.replaceState({}, '', '/?seed=Alpha&depth=1&nodes=10');

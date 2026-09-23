@@ -191,15 +191,19 @@ describe('Home live crawl streaming', () => {
     ],
   });
 
+  act(() => {
+  runPendingFrames();
+});
+
   await waitFor(() => {
     expect(
-      screen.getByRole('button', { name: 'Page 0' }),
+      screen.getByRole('button', { name: /Page 0/ }),
     ).toBeInTheDocument();
   });
 
   // Select Page 0 from the sidebar.
   fireEvent.click(
-    screen.getByRole('button', { name: 'Page 0' }),
+    screen.getByRole('button', { name: /Page 0/ }),
   );
 
   await waitFor(() => {
@@ -342,7 +346,7 @@ it('resets expanded-node state when starting Go deeper', async () => {
 
   // Select Page 0.
   fireEvent.click(
-    screen.getByRole('button', { name: 'Page 0' }),
+    screen.getByRole('button', { name: /Page 0/ }),
   );
 
   await waitFor(() => {

@@ -165,6 +165,65 @@ it('preserves expansion depth when baseDepth is greater than the normal crawl de
   }
 });
 
+it('consumes request budget once per actual HTTP retry attempt', async () => {
+  const originalFetch = globalThis.fetch;
+
+  let attempts = 0;
+  const beforeRequest = vi.fn(() => true);
+
+  globalThis.fetch = vi.fn(async () => {
+    attempts += 1;
+
+    if (attempts < 3) {
+      return new Response(
+        JSON.stringify({ error: 'rate limited' }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': '0.001',
+          },
+        },
+      );
+    }
+
+    return Response.json({
+      query: {
+        pages: [
+          {
+            pageid: 0,
+            title: 'Page 0',
+            links: [
+              { title: 'Page 1' },
+            ],
+          },
+        ],
+      },
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await getPageLinksBatch(
+      ['Page 0'],
+      undefined,
+      {
+        paginationSessionId: 'retry-budget-test',
+        beforeRequest,
+      },
+    );
+
+    expect(result.pages[0]?.title).toBe('Page 0');
+
+    // 429 → 429 → success
+    expect(attempts).toBe(3);
+
+    // One budget check for every actual HTTP attempt.
+    expect(beforeRequest).toHaveBeenCalledTimes(3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
   it('does not paginate satisfied pages in a mixed batch', async () => {
     const mock = installMockMediaWiki();
 

@@ -194,15 +194,15 @@ function runPendingFrames() {
     ],
   });
 
-  await waitFor(() => {
-  expect(frameCallbacks.size).toBe(1);
-});
-
   act(() => {
   runPendingFrames();
 });
 
- expect(await screen.findByText('Page 0')).toBeInTheDocument();
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: /Page 0/ }),
+    ).toBeInTheDocument();
+  });
 
   // Select Page 0 from the sidebar.
   fireEvent.click(

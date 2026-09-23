@@ -63,6 +63,23 @@ function topicalLinks(title: string): string[] {
     .sort((left, right) => left.localeCompare(right));
 }
 
+function continuationOffset(token: string | null): number {
+  if (!token) return 0;
+
+  const parts = token.split('|');
+  const offset = Number(parts.at(-1));
+
+  return Number.isFinite(offset) ? offset : 0;
+}
+
+function makeContinuationToken(title: string, offset: number): string {
+  const pageId = pageNumber(canonicalTitle(title)) ?? 0;
+
+  // Synthetic token that mirrors the important property of
+  // MediaWiki's real plcontinue: the page id is identifiable.
+  return `${pageId}|0|${offset}`;
+}
+
 function responseFor(
   titles: string[],
   offset: number,
@@ -99,7 +116,24 @@ function responseFor(
       redirects: titles.filter((title) => /^Redirect \d+$/.test(normalizeTitle(title)))
         .map((title) => ({ from: normalizeTitle(title), to: canonicalTitle(title) })),
     },
-    ...(hasMore ? { continue: { plcontinue: String(offset + LINKS_PER_REQUEST) } } : {}),
+    ...(hasMore
+  ? {
+      continue: {
+        plcontinue: makeContinuationToken(
+          titles.find((title) => {
+            const links = mode === 'topical'
+              ? topicalLinks(canonicalTitle(title))
+              : mode === 'alphabetical'
+                ? alphabeticalLinks(canonicalTitle(title))
+                : defaultLinks(canonicalTitle(title));
+
+            return offset + LINKS_PER_REQUEST < links.length;
+          }) ?? titles[0],
+          offset + LINKS_PER_REQUEST,
+        ),
+      },
+    }
+  : {}),
   });
 }
 
@@ -142,8 +176,10 @@ export function installMockMediaWiki(options: MockMediaWikiOptions = {}): MockMe
     }
 
     const titles = (url.searchParams.get('titles') || '').split('|').filter(Boolean);
-    const offset = Number(url.searchParams.get('plcontinue') || '0');
-    return responseFor(titles, Number.isFinite(offset) ? offset : 0, mode, stats);
+    const continueToken = url.searchParams.get('plcontinue');
+    const offset = continuationOffset(continueToken);
+
+    return responseFor(titles, offset, mode, stats);
   };
 
   return {

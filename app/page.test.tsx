@@ -4,6 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { WikiNode } from '@/types/graph';
+vi.mock('./components/useNodeSummary', () => ({
+  useNodeSummary: () => ({
+    data: {
+      extract: 'Test summary',
+      description: 'Test page',
+    },
+    isLoading: false,
+    isError: false,
+  }),
+}));
 import Home from './page';
 
 // Keep the dynamically imported WebGL canvas out of jsdom.
@@ -18,6 +28,7 @@ function makeNode(id: string): WikiNode {
 
 interface SseChannel {
   emit: (event: string, data: unknown) => void;
+  close: () => void;
 }
 
 function createSseChannel(): SseChannel & { response: Response } {
@@ -27,11 +38,22 @@ function createSseChannel(): SseChannel & { response: Response } {
     start(c) { controller = c; },
   });
   return {
-    response: new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } }),
-    emit(event, data) {
-      controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-    },
-  };
+  response: new Response(stream, {
+    headers: { 'Content-Type': 'text/event-stream' },
+  }),
+
+  emit(event, data) {
+    controller.enqueue(
+      encoder.encode(
+        `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+      ),
+    );
+  },
+
+  close() {
+    controller.close();
+  },
+};
 }
 
 describe('Home live crawl streaming', () => {
@@ -129,4 +151,271 @@ describe('Home live crawl streaming', () => {
     expect(screen.getByText('Crawl in progress: 1 pages found')).toBeInTheDocument();
     expect(screen.getByText('Fresh Page From B')).toBeInTheDocument();
   });
+  it('keeps a partially expanded node retryable and marks it expanded only after completion', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/?seed=Alpha&depth=1&nodes=10',
+  );
+
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <Home />
+    </QueryClientProvider>,
+  );
+
+  await waitFor(() => {
+    expect(crawlChannels).toHaveLength(1);
+  });
+
+  const initialCrawl = crawlChannels[0];
+
+  initialCrawl.emit('nodes', {
+    nodes: [
+      makeNode('Page 0'),
+      makeNode('Page 1'),
+    ],
+  });
+
+  initialCrawl.emit('edges', {
+    edges: [
+      { source: 'Page 0', target: 'Page 1' },
+    ],
+  });
+
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: 'Page 0' }),
+    ).toBeInTheDocument();
+  });
+
+  // Select Page 0 from the sidebar.
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Page 0' }),
+  );
+
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: 'Expand' }),
+    ).toBeInTheDocument();
+  });
+
+  // Start expansion.
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Expand' }),
+  );
+
+  await waitFor(() => {
+    expect(crawlChannels).toHaveLength(2);
+  });
+
+  const partialExpansion = crawlChannels[1];
+
+  partialExpansion.emit('done', {
+    result: {
+      id: 'partial-expansion',
+      seedId: 'Page 0',
+      nodes: [makeNode('Page 2')],
+      edges: [
+        { source: 'Page 0', target: 'Page 2' },
+      ],
+      communities: [],
+      crawledAt: new Date().toISOString(),
+      positions: {},
+      partial: true,
+      failedTitles: ['Page 3'],
+    },
+  });
+
+  partialExpansion.close();
+
+  // The node must remain retryable.
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: 'Expand' }),
+    ).toBeInTheDocument();
+  });
+
+  expect(
+    screen.queryByRole('button', { name: 'Expanded' }),
+  ).not.toBeInTheDocument();
+
+  // Retry the expansion.
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Expand' }),
+  );
+
+  await waitFor(() => {
+    expect(crawlChannels).toHaveLength(3);
+  });
+
+  const completedExpansion = crawlChannels[2];
+
+  completedExpansion.emit('done', {
+    result: {
+      id: 'completed-expansion',
+      seedId: 'Page 0',
+      nodes: [makeNode('Page 3')],
+      edges: [
+        { source: 'Page 0', target: 'Page 3' },
+      ],
+      communities: [],
+      crawledAt: new Date().toISOString(),
+      positions: {},
+      partial: false,
+      failedTitles: [],
+    },
+  });
+
+  completedExpansion.close();
+
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: 'Expanded' }),
+    ).toBeInTheDocument();
+  });
+});
+
+it('resets expanded-node state when starting Go deeper', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/?seed=Alpha&depth=1&nodes=10',
+  );
+
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <Home />
+    </QueryClientProvider>,
+  );
+
+  await waitFor(() => {
+    expect(crawlChannels).toHaveLength(1);
+  });
+
+  const initialCrawl = crawlChannels[0];
+
+  const initialNodes = [
+    makeNode('Page 0'),
+    makeNode('Page 1'),
+  ];
+
+  initialCrawl.emit('done', {
+    result: {
+      id: 'initial-result',
+      seedId: 'Page 0',
+      nodes: initialNodes,
+      edges: [
+        { source: 'Page 0', target: 'Page 1' },
+      ],
+      communities: [],
+      crawledAt: new Date().toISOString(),
+      positions: {},
+      partial: false,
+      failedTitles: [],
+    },
+  });
+
+  initialCrawl.close();
+
+  await waitFor(() => {
+    expect(
+      screen.getByText('Crawl complete: 2 pages found'),
+    ).toBeInTheDocument();
+  });
+
+  // Select Page 0.
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Page 0' }),
+  );
+
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: 'Expand' }),
+    ).toBeInTheDocument();
+  });
+
+  // Expand it successfully.
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Expand' }),
+  );
+
+  await waitFor(() => {
+    expect(crawlChannels).toHaveLength(2);
+  });
+
+  const expansion = crawlChannels[1];
+
+  expansion.emit('done', {
+    result: {
+      id: 'expanded-result',
+      seedId: 'Page 0',
+      nodes: [makeNode('Page 2')],
+      edges: [
+        { source: 'Page 0', target: 'Page 2' },
+      ],
+      communities: [],
+      crawledAt: new Date().toISOString(),
+      positions: {},
+      partial: false,
+      failedTitles: [],
+    },
+  });
+
+  expansion.close();
+
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: 'Expanded' }),
+    ).toBeInTheDocument();
+  });
+
+  // Open the crawl controls.
+  fireEvent.click(
+    screen.getByRole('button', { name: /Options/i }),
+  );
+
+  const goDeeperButton = screen.getByRole(
+    'button',
+    { name: /Go deeper/i },
+  );
+
+  expect(goDeeperButton).toBeInTheDocument();
+  expect(goDeeperButton).toBeEnabled();
+
+  // Start the new crawl.
+  fireEvent.click(goDeeperButton);
+
+  await waitFor(() => {
+    expect(crawlChannels).toHaveLength(3);
+  });
+
+  // Expansion state must have been reset immediately.
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: 'Expand' }),
+    ).toBeInTheDocument();
+  });
+
+  expect(
+    screen.queryByRole('button', { name: 'Expanded' }),
+  ).not.toBeInTheDocument();
+});
+
 });

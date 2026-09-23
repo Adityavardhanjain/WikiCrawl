@@ -13,6 +13,11 @@ export const maxDuration = 60;
 const MAX_EXPAND_KNOWN_NODES = 500;
 const MAX_EXPAND_KNOWN_EDGES = 50_000;
 const MAX_EXPAND_NODE_ID_LENGTH = 512;
+const MIN_DEPTH = 1;
+const MAX_DEPTH = 3;
+const MIN_MAX_NODES = 50;
+const MAX_MAX_NODES = 500;
+const MAX_SEED_TITLE_LENGTH = 512;
 const encoder = new TextEncoder();
 
 function sendStreamEvent(controller: ReadableStreamDefaultController, event: string, payload: unknown) {
@@ -39,6 +44,7 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as CrawlRequest;
     const { seedTitle, depth, maxNodes, knownNodeIds, knownEdgeIndexPairs, baseDepth } = body;
 
+    // Validate seedTitle
     if (!seedTitle || typeof seedTitle !== 'string') {
       return NextResponse.json(
         { error: 'seedTitle is required' },
@@ -46,78 +52,157 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (seedTitle.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'seedTitle must not be empty' },
+        { status: 400 }
+      );
+    }
+
+    if (seedTitle.length > MAX_SEED_TITLE_LENGTH) {
+      return NextResponse.json(
+        { error: 'seedTitle is too long' },
+        { status: 400 }
+      );
+    }
+
+    // Validate depth
+    if (depth !== undefined && depth !== null) {
+      if (typeof depth !== 'number' || !Number.isInteger(depth)) {
+        return NextResponse.json(
+          { error: 'depth must be an integer' },
+          { status: 400 }
+        );
+      }
+
+      if (depth < MIN_DEPTH || depth > MAX_DEPTH) {
+        return NextResponse.json(
+          { error: `depth must be between ${MIN_DEPTH} and ${MAX_DEPTH}` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Validate maxNodes
+    if (maxNodes !== undefined && maxNodes !== null) {
+      if (typeof maxNodes !== 'number' || !Number.isInteger(maxNodes)) {
+        return NextResponse.json(
+          { error: 'maxNodes must be an integer' },
+          { status: 400 }
+        );
+      }
+
+      if (maxNodes < MIN_MAX_NODES || maxNodes > MAX_MAX_NODES) {
+        return NextResponse.json(
+          { error: `maxNodes must be between ${MIN_MAX_NODES} and ${MAX_MAX_NODES}` },
+          { status: 400 }
+        );
+      }
+    }
+
     const isExpand = Array.isArray(knownNodeIds);
     const knownIds = knownNodeIds ?? [];
     if (isExpand) {
-  if (
-    knownIds.length === 0 ||
-    knownIds.length > MAX_EXPAND_KNOWN_NODES
-  ) {
-    return NextResponse.json(
-      { error: 'Invalid expansion node count' },
-      { status: 400 }
-    );
-  }
+      if (
+        knownIds.length === 0 ||
+        knownIds.length > MAX_EXPAND_KNOWN_NODES
+      ) {
+        return NextResponse.json(
+          { error: 'Invalid expansion node count' },
+          { status: 400 }
+        );
+      }
 
-  if (
-    !Array.isArray(knownEdgeIndexPairs) ||
-    knownEdgeIndexPairs.length > MAX_EXPAND_KNOWN_EDGES
-  ) {
-    return NextResponse.json(
-      { error: 'Invalid expansion edge count' },
-      { status: 400 }
-    );
-  }
+      if (
+        !Array.isArray(knownEdgeIndexPairs) ||
+        knownEdgeIndexPairs.length > MAX_EXPAND_KNOWN_EDGES
+      ) {
+        return NextResponse.json(
+          { error: 'Invalid expansion edge count' },
+          { status: 400 }
+        );
+      }
 
-  const uniqueNodeIds = new Set<string>();
+      const uniqueNodeIds = new Set<string>();
 
-  for (const id of knownIds) {
-    if (
-      typeof id !== 'string' ||
-      id.trim().length === 0 ||
-      id.length > MAX_EXPAND_NODE_ID_LENGTH
-    ) {
-      return NextResponse.json(
-        { error: 'Invalid expansion node id' },
-        { status: 400 }
-      );
+      for (const id of knownIds) {
+        if (
+          typeof id !== 'string' ||
+          id.trim().length === 0 ||
+          id.length > MAX_EXPAND_NODE_ID_LENGTH
+        ) {
+          return NextResponse.json(
+            { error: 'Invalid expansion node id' },
+            { status: 400 }
+          );
+        }
+
+        if (uniqueNodeIds.has(id)) {
+          return NextResponse.json(
+            { error: 'Duplicate expansion node id' },
+            { status: 400 }
+          );
+        }
+
+        uniqueNodeIds.add(id);
+      }
+
+      for (const pair of knownEdgeIndexPairs) {
+        if (
+          !Array.isArray(pair) ||
+          pair.length !== 2 ||
+          !Number.isInteger(pair[0]) ||
+          !Number.isInteger(pair[1]) ||
+          pair[0] < 0 ||
+          pair[1] < 0 ||
+          pair[0] >= knownIds.length ||
+          pair[1] >= knownIds.length
+        ) {
+          return NextResponse.json(
+            { error: 'Invalid expansion edge index' },
+            { status: 400 }
+          );
+        }
+      }
     }
 
-    if (uniqueNodeIds.has(id)) {
-      return NextResponse.json(
-        { error: 'Duplicate expansion node id' },
-        { status: 400 }
-      );
+    // Validate baseDepth (only used for expand, but validate if present)
+    if (baseDepth !== undefined && baseDepth !== null) {
+      if (typeof baseDepth !== 'number') {
+        return NextResponse.json(
+          { error: 'baseDepth must be a number' },
+          { status: 400 }
+        );
+      }
+
+      if (!Number.isFinite(baseDepth)) {
+        return NextResponse.json(
+          { error: 'baseDepth must be a finite number' },
+          { status: 400 }
+        );
+      }
+
+      if (baseDepth < 0) {
+        return NextResponse.json(
+          { error: 'baseDepth must be non-negative' },
+          { status: 400 }
+        );
+      }
     }
 
-    uniqueNodeIds.add(id);
-  }
+    const validatedBaseDepth = baseDepth !== undefined && baseDepth !== null
+      ? Math.max(Math.trunc(Number(baseDepth)), 0)
+      : 0;
+    const validatedDepth = Math.min(Math.max(depth ?? 2, MIN_DEPTH), MAX_DEPTH);
+    const validatedMaxNodes = Math.min(Math.max(maxNodes ?? 150, MIN_MAX_NODES), MAX_MAX_NODES);
 
-  for (const pair of knownEdgeIndexPairs) {
-    if (
-      !Array.isArray(pair) ||
-      pair.length !== 2 ||
-      !Number.isInteger(pair[0]) ||
-      !Number.isInteger(pair[1]) ||
-      pair[0] < 0 ||
-      pair[1] < 0 ||
-      pair[0] >= knownIds.length ||
-      pair[1] >= knownIds.length
-    ) {
-      return NextResponse.json(
-        { error: 'Invalid expansion edge index' },
-        { status: 400 }
-      );
+    // Check crawl cache first before making Wikipedia API calls
+    const cacheKey = generateCacheKey(seedTitle, validatedDepth, validatedMaxNodes);
+    const cachedResult = isExpand ? null : getCachedResult(cacheKey);
+
+    if (cachedResult) {
+      return NextResponse.json(cachedResult);
     }
-  }
-}
-const rawBaseDepth = Number(baseDepth);
-
-const validatedBaseDepth = Number.isFinite(rawBaseDepth)
-  ? Math.max(Math.trunc(rawBaseDepth), 0)
-  : 0;
-    const validatedDepth = Math.min(Math.max(depth || 2, 1), 3);
-    const validatedMaxNodes = Math.min(Math.max(maxNodes || 150, 50), 500);
 
     const seedPage = await getPageLinks(seedTitle);
     if (seedPage.missing) {
@@ -128,13 +213,6 @@ const validatedBaseDepth = Number.isFinite(rawBaseDepth)
         { error: 'not_found', title: seedTitle, suggestions },
         { status: 404 },
       );
-    }
-
-    const cacheKey = generateCacheKey(seedTitle, validatedDepth, validatedMaxNodes);
-    const cachedResult = isExpand ? null : getCachedResult(cacheKey);
-
-    if (cachedResult) {
-      return NextResponse.json(cachedResult);
     }
 
     const stream = new ReadableStream({

@@ -396,32 +396,42 @@ export default function Home() {
   const expandMutation = useMutation({
     mutationFn: async (nodeId: string) => {
       if (!displayData) throw new Error('No graph data available to expand.');
+      if (!submittedRequest) throw new Error('No active crawl request.');
+      const nonce = submittedRequest.nonce;
+      const currentData = displayData;
+      const currentDepth = depth;
+      const currentMaxNodes = maxNodes;
       const response = await fetch('/api/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildExpandRequestBody(nodeId, displayData, depth, maxNodes)),
+        body: JSON.stringify(buildExpandRequestBody(nodeId, currentData, currentDepth, currentMaxNodes)),
       });
 
       const result = await readCrawlResponse(response);
       if (!Array.isArray(result.nodes) || !Array.isArray(result.edges)) {
         throw new Error('Received an invalid response while expanding this page.');
       }
-      return { nodeId, result };
+      return { nodeId, result, nonce };
     },
-   onSuccess: ({ nodeId, result }) => {
-  if (!result.partial) {
-    setExpandedNodeIds((current) => {
-      const next = new Set(current);
-      next.add(nodeId);
-      return next;
-    });
-  }
+    onSuccess: ({ nodeId, result, nonce }) => {
+      if (submittedRequest?.nonce !== nonce) {
+        // Ignore expand responses from old graphs
+        return;
+      }
 
-  setExpandNotice(
-    result.nodes.length === 0
-      ? `No new pages found from "${nodeId}".`
-      : null
-  );
+      if (!result.partial) {
+        setExpandedNodeIds((current) => {
+          const next = new Set(current);
+          next.add(nodeId);
+          return next;
+        });
+      }
+
+      setExpandNotice(
+        result.nodes.length === 0
+          ? `No new pages found from "${nodeId}".`
+          : null
+      );
       if (displayData && submittedRequest) {
         const queryKey = ['crawl', submittedRequest.seed, submittedRequest.depth, submittedRequest.maxNodes, submittedRequest.nonce];
         const currentData = queryClient.getQueryData<CrawlResult>(queryKey) ?? displayData;

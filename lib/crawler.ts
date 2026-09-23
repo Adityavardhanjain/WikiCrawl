@@ -392,7 +392,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     const admittedLayer = layer.slice(0, layerQuota);
     const batches: { title: string; depth: number }[][] = [];
     for (let index = 0; index < admittedLayer.length; index += WIKIPEDIA_BATCH_SIZE) {
-      batches.push(admittedLayer.slice(index, index + WIKIPEDA_BATCH_SIZE));
+      batches.push(admittedLayer.slice(index, index + WIKIPEDIA_BATCH_SIZE));
     }
     activeWork = layer.length;
     let nextBatchIndex = 0;

@@ -395,7 +395,7 @@ export default function Home() {
 
   // Expand mutation
   const expandMutation = useMutation({
-    mutationFn: async (nodeId: string, { signal }: { signal: AbortSignal }) => {
+    mutationFn: async (nodeId: string) => {
       if (!displayData) throw new Error('No graph data available to expand.');
       if (!submittedRequest) throw new Error('No active crawl request.');
       const nonce = submittedRequest.nonce;
@@ -406,7 +406,6 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildExpandRequestBody(nodeId, currentData, currentDepth, currentMaxNodes)),
-        signal,
       });
 
       const result = await readCrawlResponse(response);

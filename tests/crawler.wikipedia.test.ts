@@ -142,6 +142,29 @@ describe('offline crawler', () => {
   }
 });
 
+it('preserves expansion depth when baseDepth is greater than the normal crawl depth limit', async () => {
+  const mock = installMockMediaWiki({ mode: 'topical' });
+
+  try {
+    const result = await crawlWikipedia({
+      seedTitle: 'Page 0',
+      depth: 1,
+      maxNodes: 5,
+      knownIds: ['Page 0'],
+      baseDepth: 5,
+    });
+
+    expect(result.nodes.length).toBeGreaterThan(0);
+
+    // The expanded seed is depth 5.
+    // Its newly discovered children should therefore be depth 6.
+    expect(result.nodes.every((node) => node.depth === 6)).toBe(true);
+    expect(result.nodes.some((node) => node.depth === 5)).toBe(false);
+  } finally {
+    mock.restore();
+  }
+});
+
   it('does not paginate satisfied pages in a mixed batch', async () => {
     const mock = installMockMediaWiki();
 

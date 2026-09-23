@@ -111,11 +111,11 @@ export async function POST(request: NextRequest) {
     }
   }
 }
-    const validatedBaseDepth = Math.max(
-  Math.trunc(baseDepth ?? 0),
-  0
-);
+const rawBaseDepth = Number(baseDepth);
 
+const validatedBaseDepth = Number.isFinite(rawBaseDepth)
+  ? Math.max(Math.trunc(rawBaseDepth), 0)
+  : 0;
     const validatedDepth = Math.min(Math.max(depth || 2, 1), 3);
     const validatedMaxNodes = Math.min(Math.max(maxNodes || 150, 50), 500);
 

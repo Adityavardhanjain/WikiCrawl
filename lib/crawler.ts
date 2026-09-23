@@ -5,7 +5,7 @@ import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
 import { randomUUID } from 'node:crypto';
 
 const WIKIPEDIA_BATCH_SIZE = 8;
-const MAX_CRAWL_CONCURRENCY = 6;
+const MAX_CRAWL_CONCURRENCY = 3;
 const PAGE_LINK_LIMIT: number | undefined = undefined;
 const MAX_REQUEST_BUDGET = 500;
 
@@ -121,7 +121,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   let lastProgressDone = -1;
   let activeWork = 0;
   let requestsUsed = 0;
-  const configuredConcurrency = Number(process.env.CRAWL_CONCURRENCY ?? 4);
+  const configuredConcurrency = Number(process.env.CRAWL_CONCURRENCY ?? 3);
   const crawlConcurrency = Math.min(MAX_CRAWL_CONCURRENCY, Math.max(1, Math.trunc(configuredConcurrency) || 4));
 
   const rankLayer = async (layer: { title: string; depth: number }[]): Promise<typeof layer> => {

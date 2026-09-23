@@ -261,47 +261,75 @@ export default function Home() {
     queryFn: async () => {
       if (!submittedRequest) throw new Error('No crawl request submitted');
       const request = submittedRequest;
+      const isCurrentRequest = () => submittedRequestRef.current?.nonce === request.nonce;
+
       try {
         const response = await fetch('/api/crawl', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(getCrawlPayload(request)),
         });
-        const result = await readCrawlResponse(response, updateLoadingProgress, {
-          onNodes: (nodes) => mergeLiveData(request, (current) => ({
-            ...current,
-            nodes: (() => {
-              const merged = new Map(current.nodes.map((node) => [node.id, node]));
-              for (const node of nodes) if (node?.id) merged.set(node.id, node);
-              return [...merged.values()];
-            })(),
-          })),
-          onEdges: (edges) => mergeLiveData(request, (current) => ({
-            ...current,
-            edges: (() => {
-              const merged = new Map(current.edges.map((edge) => [`${edge.source}|${edge.target}`, edge]));
-              for (const edge of edges) if (edge?.source && edge?.target) merged.set(`${edge.source}|${edge.target}`, edge);
-              return [...merged.values()];
-            })(),
-          })),
-          onAnalysis: (metrics, communities) => mergeLiveData(request, (current) => ({
-            ...current,
-            nodes: current.nodes.map((node) => ({ ...node, ...(metrics[node.id] ?? {}) })),
-            communities,
-          })),
-          onWarning: (failedTitles) => setCrawlWarning(failedTitles.length),
-        });
+        const result = await readCrawlResponse(
+          response,
+          (progress) => {
+            if (!isCurrentRequest()) return;
+            updateLoadingProgress(progress);
+          },
+          {
+            onNodes: (nodes) => mergeLiveData(request, (current) => ({
+              ...current,
+              nodes: (() => {
+                const merged = new Map(current.nodes.map((node) => [node.id, node]));
+                for (const node of nodes) if (node?.id) merged.set(node.id, node);
+                return [...merged.values()];
+              })(),
+            })),
+            onEdges: (edges) => mergeLiveData(request, (current) => ({
+              ...current,
+              edges: (() => {
+                const merged = new Map(current.edges.map((edge) => [`${edge.source}|${edge.target}`, edge]));
+                for (const edge of edges) if (edge?.source && edge?.target) merged.set(`${edge.source}|${edge.target}`, edge);
+                return [...merged.values()];
+              })(),
+            })),
+            onAnalysis: (metrics, communities) => mergeLiveData(request, (current) => ({
+              ...current,
+              nodes: current.nodes.map((node) => ({ ...node, ...(metrics[node.id] ?? {}) })),
+              communities,
+            })),
+            onWarning: (failedTitles) => {
+              if (!isCurrentRequest()) return;
+              setCrawlWarning(failedTitles.length);
+            },
+          },
+        );
         const issues = validateGraphData(result);
         if (issues.length > 0) throw new Error(issues[0]);
         return result;
       } catch (error) {
-        if (error instanceof CrawlNotFoundError) {
-          setNotFound({ title: error.title, suggestions: error.suggestions });
-          setGraphError(null);
+        if (error instanceof Error && error.name === 'AbortError') {
           throw error;
         }
-        const message = error instanceof Error ? error.message : 'Unable to explore this topic right now.';
-        setGraphError(message);
+        if (error instanceof CrawlNotFoundError) {
+          if (isCurrentRequest()) {
+            setNotFound({
+              title: error.title,
+              suggestions: error.suggestions,
+            });
+            setGraphError(null);
+          }
+
+          throw error;
+        }
+
+        const message = error instanceof Error
+          ? error.message
+          : 'Unable to explore this topic right now.';
+
+        if (isCurrentRequest()) {
+          setGraphError(message);
+        }
+
         throw error;
       }
     },

@@ -82,7 +82,7 @@ describe('offline crawler', () => {
     try {
       const firstPage = await getPageLinksBatch(['Page 0']);
       expect(firstPage.pages[0].links).toHaveLength(500);
-      expect(firstPage.continueToken).toBe('500');
+      expect(firstPage.continueToken).toBe('0|0|500');
 
       const secondPage = await getPageLinksBatch(['Page 0'], firstPage.continueToken);
       const links = [...firstPage.pages[0].links, ...secondPage.pages[0].links];
@@ -110,7 +110,7 @@ describe('offline crawler', () => {
     expect(firstPage.pages[0]?.resolvedTitle).toBe('Page 0');
     expect(firstPage.pages[0]?.links).toHaveLength(500);
     expect(firstPage.pages[0]?.complete).toBe(false);
-    expect(firstPage.continueToken).toBe('500');
+    expect(firstPage.continueToken).toBe('0|0|500');
 
     const secondPage = await getPageLinksBatch(
       ['Redirect 0'],
@@ -230,7 +230,7 @@ it('consumes request budget once per actual HTTP retry attempt', async () => {
     try {
       const firstPage = await getPageLinksBatch(['Page 0', 'Page 1']);
       expect(firstPage.pages.find((page) => page.title === 'Page 1')?.complete).toBe(true);
-      expect(firstPage.continueToken).toBe('500');
+      expect(firstPage.continueToken).toBe('0|0|500');
       const secondPage = await getPageLinksBatch(['Page 0'], firstPage.continueToken);
       expect(secondPage.pages).toHaveLength(1);
       expect(mock.stats.requests).toBe(2);

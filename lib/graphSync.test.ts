@@ -92,6 +92,18 @@ describe('syncGraphData', () => {
     expect(graph.hasNode('old')).toBe(false);
   });
 
+  it('does not emit graph attribute updates for an unchanged streamed snapshot', () => {
+    const graph = new Graph({ type: 'directed' });
+    const snapshot = data([node('seed'), node('new')], [{ source: 'seed', target: 'new' }]);
+    syncGraphData(graph, snapshot, options);
+    let updates = 0;
+    graph.on('eachNodeAttributesUpdated', () => { updates += 1; });
+
+    syncGraphData(graph, snapshot, options);
+
+    expect(updates).toBe(0);
+  });
+
   it('recolors without changing positions', () => {
     const graph = new Graph({ type: 'directed' });
     syncGraphData(graph, data([node('seed'), node('new')]), options);

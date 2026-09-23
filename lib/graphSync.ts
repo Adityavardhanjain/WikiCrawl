@@ -78,6 +78,21 @@ export function syncGraphData(
 
   const incomingIds = new Set(data.nodes.map((node) => node.id));
   const addedNodeIds: string[] = [];
+  const currentPositions = new Map(
+    graph.nodes().map((nodeId) => {
+      const attributes = graph.getNodeAttributes(nodeId);
+      return [nodeId, { x: attributes.x as number, y: attributes.y as number }];
+    }),
+  );
+  const neighborsByNode = new Map<string, Set<string>>();
+  for (const edge of data.edges) {
+    const sourceNeighbors = neighborsByNode.get(edge.source) ?? new Set<string>();
+    const targetNeighbors = neighborsByNode.get(edge.target) ?? new Set<string>();
+    sourceNeighbors.add(edge.target);
+    targetNeighbors.add(edge.source);
+    neighborsByNode.set(edge.source, sourceNeighbors);
+    neighborsByNode.set(edge.target, targetNeighbors);
+  }
 
   for (const node of data.nodes) {
     const isSeed = node.id === data.seedId;
@@ -86,25 +101,28 @@ export function syncGraphData(
     const existing = graph.hasNode(node.id);
 
     if (existing) {
-      graph.updateNodeAttributes(node.id, (attributes) => ({
-        ...attributes,
-        size,
-        color,
-        label: node.title,
-        raw: node,
-        isSeed,
-      }));
+      const attributes = graph.getNodeAttributes(node.id);
+      if (
+        attributes.size !== size ||
+        attributes.color !== color ||
+        attributes.label !== node.title ||
+        attributes.raw !== node ||
+        attributes.isSeed !== isSeed
+      ) {
+        graph.updateNodeAttributes(node.id, (current) => ({
+          ...current,
+          size,
+          color,
+          label: node.title,
+          raw: node,
+          isSeed,
+        }));
+      }
       continue;
     }
 
-    const currentPositions = new Map(
-      graph.nodes().map((nodeId) => {
-        const attributes = graph.getNodeAttributes(nodeId);
-        return [nodeId, { x: attributes.x as number, y: attributes.y as number }];
-      }),
-    );
     const position = options.initialPositions?.get(node.id)
-      ?? positionNearNeighbors(node.id, data.edges, currentPositions, data.seedId);
+      ?? positionNearNeighbors(node.id, data.edges, currentPositions, data.seedId, neighborsByNode);
     graph.mergeNode(node.id, {
       x: position.x,
       y: position.y,
@@ -115,6 +133,7 @@ export function syncGraphData(
       raw: node,
       isSeed,
     } satisfies GraphNodeAttributes);
+    currentPositions.set(node.id, position);
     addedNodeIds.push(node.id);
   }
 
@@ -134,14 +153,20 @@ export function syncGraphData(
     incomingEdges.add(key);
     const sourceNode = nodesById.get(edge.source);
     const targetNode = nodesById.get(edge.target);
-    graph.mergeEdge(edge.source, edge.target, {
-      size: 0.8,
-      color: 'rgba(148, 163, 184, 0.22)',
-      type: 'line',
-      weight: sourceNode && targetNode
-        ? computeEdgeWeight(sourceNode, targetNode, inDegreeByNode.get(edge.target) ?? 0, data.nodes.length)
-        : 1,
-    });
+    const weight = sourceNode && targetNode
+      ? computeEdgeWeight(sourceNode, targetNode, inDegreeByNode.get(edge.target) ?? 0, data.nodes.length)
+      : 1;
+    if (
+      !graph.hasEdge(edge.source, edge.target) ||
+      graph.getEdgeAttribute(edge.source, edge.target, 'weight') !== weight
+    ) {
+      graph.mergeEdge(edge.source, edge.target, {
+        size: 0.8,
+        color: 'rgba(148, 163, 184, 0.22)',
+        type: 'line',
+        weight,
+      });
+    }
   }
 
   for (const edge of graph.edges()) {
@@ -157,8 +182,9 @@ export function updateGraphColors(
   data: CrawlResult,
   colorForNode: (node: WikiNode) => string,
 ): void {
+  const nodesById = new Map(data.nodes.map((node) => [node.id, node]));
   graph.updateEachNodeAttributes((nodeId, attributes) => {
-    const node = data.nodes.find((candidate) => candidate.id === nodeId);
+    const node = nodesById.get(nodeId);
     return node ? { ...attributes, color: colorForNode(node) } : attributes;
   });
 }

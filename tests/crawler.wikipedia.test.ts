@@ -42,6 +42,10 @@ describe('offline crawler', () => {
       expect(new Set(result.nodes.map((node) => node.id)).size).toBe(result.nodes.length);
       expect(new Set(result.edges.map((edge) => `${edge.source}|${edge.target}`)).size)
         .toBe(result.edges.length);
+      for (const node of result.nodes) {
+        expect(node.outDegree).toBe(result.edges.filter((edge) => edge.source === node.id).length);
+        expect(node.inDegree).toBe(result.edges.filter((edge) => edge.target === node.id).length);
+      }
       expect(result.nodes.every((node) => node.depth >= 0 && node.depth <= 2)).toBe(true);
       expect(result.nodes.find((node) => node.id === 'Page 0')?.depth).toBe(0);
       expect(progress.length).toBeGreaterThanOrEqual(result.nodes.length);

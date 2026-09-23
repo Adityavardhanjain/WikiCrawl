@@ -20,13 +20,13 @@ export function CrawlControls({
   disabled = false,
 }: CrawlControlsProps) {
   return (
-    <div className="flex items-end gap-6">
-      <div className="flex-1">
+    <div className="crawl-control-grid flex items-end gap-6">
+      <div className="crawl-control flex-1">
         <div className="flex justify-between items-center mb-2">
           <label htmlFor="crawl-depth" className="text-sm font-medium text-atlas-muted">
             Crawl Depth
           </label>
-          <span id="crawl-depth-value" className="text-sm text-cyan-400 font-medium">{depth} hop{depth !== 1 ? 's' : ''}</span>
+          <span id="crawl-depth-value" className="crawl-control-value text-sm text-cyan-400 font-medium">{depth} hop{depth !== 1 ? 's' : ''}</span>
         </div>
         <input
           id="crawl-depth"
@@ -39,7 +39,7 @@ export function CrawlControls({
           value={depth}
           onChange={(e) => onDepthChange(Number(e.target.value))}
           disabled={disabled}
-          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="crawl-range w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <div className="flex justify-between text-xs text-atlas-dim mt-1">
           <span>1 hop</span>
@@ -48,12 +48,12 @@ export function CrawlControls({
         </div>
       </div>
 
-      <div className="flex-1">
+      <div className="crawl-control flex-1">
         <div className="flex justify-between items-center mb-2">
           <label htmlFor="max-nodes" className="text-sm font-medium text-atlas-muted">
             Max Nodes
           </label>
-          <span id="max-nodes-value" className="text-sm text-cyan-400 font-medium">{maxNodes}</span>
+          <span id="max-nodes-value" className="crawl-control-value text-sm text-cyan-400 font-medium">{maxNodes}</span>
         </div>
         <input
           id="max-nodes"
@@ -66,7 +66,7 @@ export function CrawlControls({
           value={maxNodes}
           onChange={(e) => onMaxNodesChange(Number(e.target.value))}
           disabled={disabled}
-          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="crawl-range w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <div className="flex justify-between text-xs text-atlas-dim mt-1">
           <span>50</span>
@@ -80,7 +80,7 @@ export function CrawlControls({
           type="button"
           onClick={onGoDeeper}
           disabled={disabled || !canGoDeeper}
-          className="h-10 whitespace-nowrap rounded-lg border border-cyan-400/40 px-3 text-sm font-medium text-cyan-200 transition hover:bg-cyan-400/10 disabled:cursor-not-allowed disabled:opacity-40"
+          className="crawl-deeper-button h-10 whitespace-nowrap rounded-lg border border-cyan-400/40 px-3 text-sm font-medium text-cyan-200 transition hover:bg-cyan-400/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Go deeper
         </button>

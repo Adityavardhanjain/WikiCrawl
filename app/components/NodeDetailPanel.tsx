@@ -74,7 +74,7 @@ function NodeDetailPanel({
   const community = data.communities.find(c => c.id === node.communityId);
 
   return (
-    <div className="node-detail mobile-sheet reduce-effects absolute right-4 top-4 w-80 glass-strong rounded-2xl shadow-2xl overflow-hidden border border-cyan-500/20 animate-in slide-in-from-right">
+    <div className="node-detail mobile-sheet reduce-effects absolute right-4 top-4 w-80 glass-strong rounded-2xl shadow-2xl overflow-hidden border border-cyan-500/20 animate-in slide-in-from-right" role="region" aria-label={`${node.title} page details`}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-white/10 bg-gradient-to-r from-cyan-500/10 to-purple-500/10">
         <div className="flex items-center gap-3 flex-1 min-w-0">

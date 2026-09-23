@@ -167,9 +167,9 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   };
 
   return (
-    <div className="relative">
-      <form onSubmit={handleSubmit} className="flex gap-3">
-        <div className="relative flex-1">
+    <div className="seed-search relative">
+      <form onSubmit={handleSubmit} className="seed-search-form">
+        <div className="seed-search-field relative flex-1">
           {/* Search icon */}
           <div className="absolute left-4 top-1/2 -translate-y-1/2 text-cyan-400/60">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -179,8 +179,10 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
 
           <input
             ref={inputRef}
+            id={`${listboxId}-input`}
             type="text"
             role="combobox"
+            aria-label="Search Wikipedia articles"
             aria-expanded={listVisible}
             aria-controls={listboxId}
             aria-autocomplete="list"
@@ -194,17 +196,36 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setShowSuggestions(false)}
             onKeyDown={handleKeyDown}
-            placeholder="Search any Wikipedia article..."
-            className="w-full pl-12 pr-10 py-3.5 bg-slate-800/50 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 focus:bg-slate-800/80 transition-all"
+            placeholder="Search Wikipedia..."
+            className="seed-search-input w-full pl-12 pr-10 py-3.5 bg-slate-800/50 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 focus:bg-slate-800/80 transition-all"
             disabled={isLoading}
           />
+
+          {query && !isLoading && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              className={`seed-search-clear ${isSearching ? 'is-searching' : ''}`}
+              onClick={() => {
+                setQuery('');
+                setSuggestions([]);
+                setShowSuggestions(false);
+                inputRef.current?.focus();
+              }}
+            >
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                <path d="m5 5 10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
 
           {isSearching && (
             <div
               aria-hidden="true"
-              className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent"
+              className="seed-search-spinner absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent"
             />
           )}
+          <span className="sr-only" role="status" aria-live="polite">{isSearching ? 'Searching Wikipedia' : ''}</span>
 
           {/* Glow effect on focus */}
           <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-cyan-500/10 via-purple-500/10 to-pink-500/10 opacity-0 focus-within:opacity-100 transition-opacity pointer-events-none" />
@@ -213,7 +234,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
             <ul
               id={listboxId}
               role="listbox"
-              className="absolute z-50 w-full mt-2 glass-strong rounded-xl shadow-2xl overflow-hidden border border-white/10"
+              className="seed-search-list absolute z-50 w-full mt-2 glass-strong rounded-xl shadow-2xl overflow-hidden border border-white/10"
             >
               {showEmptyState ? (
                 <li>
@@ -224,7 +245,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
                     aria-selected={highlightedIndex === 0}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleSelect(trimmedQuery)}
-                    className={`w-full px-4 py-3 text-left text-slate-300 hover:bg-white/5 transition-all ${
+                    className={`seed-search-option w-full px-4 py-3 text-left text-slate-300 hover:bg-white/5 transition-all ${
                       highlightedIndex === 0 ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-white' : ''
                     }`}
                   >
@@ -243,7 +264,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
                         aria-selected={index === highlightedIndex}
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => handleSelect(suggestion.title)}
-                        className={`w-full px-4 py-3 text-left text-white hover:bg-gradient-to-r hover:from-cyan-500/20 hover:to-purple-500/20 transition-all flex items-center gap-3 ${
+                        className={`seed-search-option w-full px-4 py-3 text-left text-white hover:bg-gradient-to-r hover:from-cyan-500/20 hover:to-purple-500/20 transition-all flex items-center gap-3 ${
                           index === highlightedIndex ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20' : ''
                         }`}
                       >
@@ -268,7 +289,8 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
         <button
           type="submit"
           disabled={isLoading || !query.trim()}
-          className="btn-primary px-8 py-3.5 text-white font-semibold rounded-xl flex items-center gap-2 shadow-lg shadow-cyan-500/20"
+          aria-label="Explore article"
+          className="seed-search-submit btn-primary px-8 py-3.5 text-white font-semibold rounded-xl flex items-center gap-2 shadow-lg shadow-cyan-500/20"
         >
           {isLoading ? (
             <>

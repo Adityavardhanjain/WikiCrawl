@@ -166,7 +166,7 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, focusedCo
                 type="button"
                 aria-pressed={focusedNode === node.id}
                 onClick={() => onNodeSelect(node.id)}
-                className={`w-full text-left px-3 py-3 rounded-xl mb-1 transition-all group ${
+                className={`atlas-node-row w-full text-left px-3 py-3 rounded-xl mb-1 transition-all group ${
                   focusedNode === node.id
                     ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-lg shadow-cyan-500/20'
                     : 'hover:bg-white/5 text-slate-300'
@@ -198,7 +198,7 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, focusedCo
                 type="button"
                 aria-pressed={focusedCommunityId === community.id}
                 onClick={() => onCommunitySelect(community.id)}
-                className="w-full text-left px-3 py-3 rounded-xl mb-1 hover:bg-white/5 text-slate-300 transition-all group card-hover"
+                className="atlas-community-row w-full text-left px-3 py-3 rounded-xl mb-1 hover:bg-white/5 text-slate-300 transition-all group card-hover"
               >
                 <div className="flex items-center gap-3">
                   <div

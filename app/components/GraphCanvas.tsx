@@ -7,7 +7,7 @@ import { EdgeArrowProgram, EdgeLineProgram } from 'sigma/rendering';
 import type { CrawlResult, WikiNode, PathResult } from '@/types/graph';
 import { getFocusCameraTarget } from '@/lib/cameraFocus';
 import { getCommunityColor, getNodeSize } from '@/lib/graphAnalysis';
-import { syncGraphData, updateGraphColors } from '@/lib/graphSync';
+import { syncGraphData } from '@/lib/graphSync';
 import { computeRobustBounds } from '@/lib/layoutMetrics';
 import { seedInitialPositions } from '@/lib/layoutSeed';
 import { getRememberedPositions, useForceLayout } from './useForceLayout';
@@ -21,6 +21,7 @@ interface GraphCanvasProps {
   onNodeClick: (node: WikiNode, shiftKey?: boolean) => void;
   focusedNode: string | null;
   path: PathResult | null;
+  isStreaming?: boolean;
   isExpanded?: boolean;
   focusedCommunityId?: number | null;
 }
@@ -31,6 +32,7 @@ export function GraphCanvas({
   onNodeClick,
   focusedNode,
   path,
+  isStreaming = false,
   isExpanded = false,
   focusedCommunityId = null,
 }: GraphCanvasProps) {
@@ -65,6 +67,7 @@ export function GraphCanvas({
   const communityFrameRef = useRef<number | null>(null);
   const updateCommunityLabelsRef = useRef<() => void>(() => undefined);
   const pendingNewNodeIdsRef = useRef<string[]>([]);
+  const initialCameraFitPendingRef = useRef(false);
   const previousShapeRef = useRef({ seedId: '', nodes: 0, edges: 0 });
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [containerReady, setContainerReady] = useState(false);
@@ -112,9 +115,6 @@ export function GraphCanvas({
       return previousId < nodeId ? `${previousId}|${nodeId}` : `${nodeId}|${previousId}`;
     }) ?? [],
   ), [path]);
-  const communitiesSignature = useMemo(() => data.communities.length === 0
-    ? ''
-    : data.nodes.map((node) => `${node.id}:${node.communityId}`).sort().join('|'), [data.communities.length, data.nodes]);
   const communityNodeIds = useMemo(() => new Set(
     focusedCommunityId === null
       ? []
@@ -205,7 +205,7 @@ export function GraphCanvas({
           return {
             ...nodeAttributes,
             size: (Number(nodeAttributes.size) || 8) + 3,
-            color: '#67e8f9',
+            color: '#77c9bd',
             label: nodeData.title,
             forceLabel: true,
             zIndex: 12,
@@ -249,7 +249,7 @@ export function GraphCanvas({
           return {
             ...nodeAttributes,
             size: (Number(nodeAttributes.size) || 8) + 3,
-            color: '#f4f1ea',
+            color: '#edf0e7',
             label: nodeData.title,
             forceLabel: true,
             zIndex: 8,
@@ -271,7 +271,7 @@ export function GraphCanvas({
           return {
             ...nodeAttributes,
             size: (Number(nodeAttributes.size) || 8) + 2,
-            color: '#f7c59f',
+            color: '#d8f27a',
             label: nodeData.title,
             forceLabel: true,
             zIndex: 6,
@@ -304,7 +304,7 @@ export function GraphCanvas({
           return { ...edgeAttributes, hidden: false, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(100, 116, 139, 0.08)', size: 0.35 };
         }
         if (isPathEdge) {
-          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: '#67e8f9', size: 3 };
+          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: '#77c9bd', size: 3 };
         }
         const isFocusedEdge = focusId === source || focusId === target;
         const isHoveredEdge = hoverId === source || hoverId === target;
@@ -327,11 +327,11 @@ export function GraphCanvas({
         const normalEdgeAlpha = sourceData.communityId === targetData.communityId ? edgeAlpha : edgeAlpha * 0.5;
 
         if (isFocusedEdge) {
-          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(125, 211, 252, 0.8)', size: 1.6 };
+          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(119, 201, 189, 0.86)', size: 1.6 };
         }
 
         if (isHoveredEdge) {
-          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(125, 211, 252, 0.45)', size: 1.1 };
+          return { ...edgeAttributes, type: showArrowsRef.current ? 'arrow' : 'line', color: 'rgba(216, 242, 122, 0.54)', size: 1.1 };
         }
 
         if (focusId) {
@@ -479,36 +479,37 @@ export function GraphCanvas({
       ? new Set(graph.neighbors(focusedNodeRef.current))
       : new Set();
     const isFirstGraphSync = previousShapeRef.current.nodes === 0 && data.nodes.length > 0;
+    if (result.seedChanged) {
+      pendingNewNodeIdsRef.current = result.addedNodeIds;
+    } else if (isFirstGraphSync) {
+      pendingNewNodeIdsRef.current = result.addedNodeIds;
+    } else if (result.addedNodeIds.length > 0) {
+      pendingNewNodeIdsRef.current = [...new Set([...pendingNewNodeIdsRef.current, ...result.addedNodeIds])];
+    }
     if (isFirstGraphSync || result.seedChanged) {
-      pendingNewNodeIdsRef.current = result.seedChanged ? data.nodes.map((node) => node.id) : result.addedNodeIds;
       setLayoutRevision((revision) => revision + 1);
     }
     previousShapeRef.current = { seedId: data.seedId, nodes: data.nodes.length, edges: edgeCount };
 
     sigmaRef.current?.refresh();
     updateCommunityLabelsRef.current();
-    if (result.shouldFitCamera) {
+    if (result.shouldFitCamera) initialCameraFitPendingRef.current = true;
+    const canFitInitialGraph = initialCameraFitPendingRef.current && (!isStreaming || data.nodes.length > 1);
+    if (canFitInitialGraph && sigmaRef.current) {
+      initialCameraFitPendingRef.current = false;
       sigmaRef.current?.setCustomBBox(null);
       applyRobustBounds(true);
     }
-  }, [applyRobustBounds, data, edgeCount, maxDegree, maxDepth, rankValues]);
+  }, [applyRobustBounds, colorMode, containerReady, data, edgeCount, isStreaming, maxDegree, maxDepth, rankValues]);
 
   const { arranging, paused, togglePause } = useForceLayout(graphRef.current, {
     seedId: data.seedId,
-    changeKey: `${data.seedId}:${layoutRevision}:${!isExpanded ? communitiesSignature : ''}`,
+    changeKey: `${data.seedId}:${layoutRevision}`,
     newNodeIds: pendingNewNodeIdsRef.current,
-    relayoutAll: !isExpanded && Boolean(communitiesSignature),
+    enabled: !isStreaming,
+    relayoutAll: false,
     onLayoutStop: applyRobustBounds,
   });
-
-  useEffect(() => {
-    updateGraphColors(
-      graphRef.current,
-      data,
-      (node) => getNodeColor(node, data.seedId, colorMode, data.communities.length, maxDepth),
-    );
-    sigmaRef.current?.refresh();
-  }, [colorMode, data, maxDepth]);
 
   useEffect(() => {
     if (!denseEdges && showAllEdges) setShowAllEdges(false);
@@ -627,7 +628,7 @@ export function GraphCanvas({
       <div ref={containerRef} className="graph-surface absolute inset-0 w-full h-full" />
 
       <div
-        className="absolute top-4 right-4 flex gap-1 graph-overlay rounded-lg p-1 z-10"
+        className="graph-toolbar absolute top-4 right-4 flex gap-1 graph-overlay rounded-lg p-1 z-10"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
       >
@@ -659,7 +660,7 @@ export function GraphCanvas({
       )}
 
       <div
-        className="absolute top-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-w-xs"
+        className="graph-legend absolute top-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-w-xs"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
       >
@@ -667,14 +668,14 @@ export function GraphCanvas({
           <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          Exploration map
+          <span>Exploration map</span>
         </div>
         <div className="flex items-center gap-2 mb-2">
           <div className="w-3 h-3 rounded-full bg-[#f08a70] border border-[#ffd1c2]/70" />
           <span className="text-slate-300">Root</span>
         </div>
         {colorMode === 'community' ? (
-          <div className="space-y-1.5">
+          <div className="graph-legend-community-list space-y-1.5">
             {data.communities.slice(0, 8).map((community) => {
               const topNode = data.nodes.find((node) => node.id === community.topPages[0]);
               return (
@@ -718,7 +719,7 @@ export function GraphCanvas({
       ))}
 
       <div
-        className="absolute bottom-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-sm:hidden"
+        className="graph-gesture-key absolute bottom-4 left-4 graph-overlay rounded-xl p-4 text-xs z-10 max-sm:hidden"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
       >

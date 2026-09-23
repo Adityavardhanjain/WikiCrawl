@@ -2,9 +2,11 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { CrawlResult } from '@/types/graph';
 import { GraphCanvas } from './GraphCanvas';
+
+const cameraReset = vi.hoisted(() => vi.fn());
 
 vi.mock('sigma', () => ({
   Sigma: class MockSigma {
@@ -16,7 +18,7 @@ vi.mock('sigma', () => ({
         removeListener() {},
         getState: () => ({ ratio: 1 }),
         animate: vi.fn(),
-        animatedReset: vi.fn(),
+        animatedReset: cameraReset,
       };
     }
     getNodeDisplayData() { return undefined; }
@@ -62,7 +64,10 @@ function makeData(): CrawlResult {
 }
 
 describe('GraphCanvas DOM ownership', () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it('keeps React overlays outside the Sigma container', () => {
     const { container } = render(
@@ -76,5 +81,32 @@ describe('GraphCanvas DOM ownership', () => {
     expect(sigmaContainer).toBeEmptyDOMElement();
     expect(sigmaContainer).not.toContainElement(screen.getByRole('button', { name: 'Zoom in' }));
     expect(sigmaContainer).not.toContainElement(screen.getByText('Exploration map'));
+  });
+
+  it('defers the initial camera fit until real nodes arrive after the seed preview', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
+    cameraReset.mockClear();
+    const completeData = makeData();
+    const previewData = {
+      ...completeData,
+      id: 'streaming',
+      nodes: [completeData.nodes[0]],
+      edges: [],
+    };
+    const props = {
+      colorMode: 'community' as const,
+      onNodeClick: vi.fn(),
+      focusedNode: null,
+      path: null,
+    };
+    const { rerender } = render(
+      <GraphCanvas {...props} data={previewData} isStreaming />,
+    );
+
+    expect(cameraReset).not.toHaveBeenCalled();
+    rerender(<GraphCanvas {...props} data={completeData} isStreaming />);
+
+    await waitFor(() => expect(cameraReset).toHaveBeenCalledTimes(1));
   });
 });

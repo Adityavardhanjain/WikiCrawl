@@ -421,23 +421,19 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
       }
     }
   }
+  const inDegreeMap = new Map<string, number>();
+  const outDegreeMap = new Map<string, number>();
+  for (const edge of edges) {
+    outDegreeMap.set(edge.source, (outDegreeMap.get(edge.source) ?? 0) + 1);
+    inDegreeMap.set(edge.target, (inDegreeMap.get(edge.target) ?? 0) + 1);
+  }
   for (const node of progress.nodes) {
-    node.outDegree = edges.filter((edge) => edge.source === node.id).length;
+    node.outDegree = outDegreeMap.get(node.id) ?? 0;
+    node.inDegree = inDegreeMap.get(node.id) ?? 0;
   }
   onBatch?.([], edges.filter((edge) => !emittedEdgeKeys.has(`${edge.source}|${edge.target}`)));
 
   emitProgress(true);
-
-  // Calculate in-degrees
-  const inDegreeMap = new Map<string, number>();
-  for (const edge of edges) {
-    inDegreeMap.set(edge.target, (inDegreeMap.get(edge.target) || 0) + 1);
-  }
-
-  // Update in-degrees in nodes
-  for (const node of progress.nodes) {
-    node.inDegree = inDegreeMap.get(node.id) || 0;
-  }
 
   const resolvedSeedId = getCanonicalTitle(seedTitle, progress.resolvedTitles);
   return {

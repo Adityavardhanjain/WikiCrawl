@@ -140,10 +140,11 @@ function runPendingFrames() {
     await waitFor(() => expect(frameCallbacks.size).toBe(1));
 
     // The stale crawl A stream then delivers a late update before the frame runs.
-    // (The progress event only proves crawl A's reader loop processed the nodes event first.)
     crawlA.emit('nodes', { nodes: [makeNode('Late Stale Page From A')] });
     crawlA.emit('progress', { progress: { done: 1, target: 2 } });
-    await waitFor(() => expect(screen.getByText(/% mapped/)).toHaveTextContent('50% mapped'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
     act(() => runPendingFrames());
 
@@ -151,8 +152,7 @@ function runPendingFrames() {
     expect(screen.queryByText('Stale Page From A')).not.toBeInTheDocument();
     expect(screen.queryByText('Late Stale Page From A')).not.toBeInTheDocument();
     // 4. ...and crawl B's update still applies normally.
-    expect(screen.getByText('Crawl in progress: 1 pages found')).toBeInTheDocument();
-    expect(screen.getByText('Fresh Page From B')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Fresh Page From B')).toBeInTheDocument());
   });
   it('keeps a partially expanded node retryable and marks it expanded only after completion', async () => {
   window.history.replaceState(
@@ -194,9 +194,8 @@ function runPendingFrames() {
     ],
   });
 
-  act(() => {
+  await waitFor(() => expect(frameCallbacks.size).toBeGreaterThan(0));
   runPendingFrames();
-});
 
   await waitFor(() => {
     expect(

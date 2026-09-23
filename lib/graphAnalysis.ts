@@ -166,10 +166,23 @@ export function getNodeSize(
   maxSize: number = 18,
   rankValues: number[] = [pagerank],
 ): number {
-  const sortedRanks = [...rankValues].filter(Number.isFinite).sort((left, right) => left - right);
+  let sortedRanks = sortedRankCache.get(rankValues);
+  if (!sortedRanks) {
+    sortedRanks = rankValues.filter(Number.isFinite).sort((left, right) => left - right);
+    sortedRankCache.set(rankValues, sortedRanks);
+  }
   if (sortedRanks.length <= 1) return minSize;
 
-  const lowerRankCount = sortedRanks.filter((rank) => rank < pagerank).length;
+  let lower = 0;
+  let upper = sortedRanks.length;
+  while (lower < upper) {
+    const middle = (lower + upper) >>> 1;
+    if (sortedRanks[middle] < pagerank) lower = middle + 1;
+    else upper = middle;
+  }
+  const lowerRankCount = lower;
   const percentile = lowerRankCount / (sortedRanks.length - 1);
   return minSize + Math.sqrt(percentile) * (maxSize - minSize);
 }
+
+const sortedRankCache = new WeakMap<number[], number[]>();

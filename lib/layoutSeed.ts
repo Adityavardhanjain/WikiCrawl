@@ -48,11 +48,15 @@ export function positionNearNeighbors(
   edges: CrawlResult['edges'],
   positions: Map<string, LayoutPosition>,
   seedId: string,
+  neighborsByNode?: Map<string, Set<string>>,
 ): LayoutPosition {
-  const neighborIds = new Set<string>();
-  for (const edge of edges) {
-    if (edge.source === nodeId) neighborIds.add(edge.target);
-    if (edge.target === nodeId) neighborIds.add(edge.source);
+  let neighborIds = neighborsByNode?.get(nodeId);
+  if (!neighborIds) {
+    neighborIds = new Set<string>();
+    for (const edge of edges) {
+      if (edge.source === nodeId) neighborIds.add(edge.target);
+      if (edge.target === nodeId) neighborIds.add(edge.source);
+    }
   }
 
   const neighbors = [...neighborIds]

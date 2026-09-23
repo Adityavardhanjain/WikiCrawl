@@ -16,13 +16,14 @@ interface UseForceLayoutOptions {
   seedId: string;
   changeKey: string;
   newNodeIds: string[];
+  enabled?: boolean;
   relayoutAll?: boolean;
   onLayoutStop?: () => void;
 }
 
 export function useForceLayout(
   graph: Graph,
-  { seedId, changeKey, newNodeIds, relayoutAll = false, onLayoutStop }: UseForceLayoutOptions,
+  { seedId, changeKey, newNodeIds, enabled = true, relayoutAll = false, onLayoutStop }: UseForceLayoutOptions,
 ): { arranging: boolean; paused: boolean; togglePause: () => void } {
   const layoutRef = useRef<FA2Layout | null>(null);
   const seedRef = useRef<string | null>(null);
@@ -40,7 +41,7 @@ export function useForceLayout(
     layoutRef.current?.kill();
     layoutRef.current = null;
 
-    if (graph.order === 0) {
+    if (!enabled || graph.order === 0) {
       setArranging(false);
       return;
     }
@@ -84,15 +85,15 @@ export function useForceLayout(
         ));
         setArranging(false);
         onLayoutStopRef.current?.();
-      }, 3000);
-    }, 400);
+      }, 1800);
+    }, 80);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
       layoutRef.current?.kill();
       layoutRef.current = null;
     };
-  }, [changeKey, graph, relayoutAll, seedId]);
+  }, [changeKey, enabled, graph, relayoutAll, seedId]);
 
   const togglePause = () => {
     const layout = layoutRef.current;

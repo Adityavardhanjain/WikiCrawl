@@ -19,8 +19,9 @@ function parseBoundedNumber(value: string | null, fallback: number, min: number,
 
 export function parseCrawlParams(search: string): { seed: string | null; depth: number; maxNodes: number } {
   const params = new URLSearchParams(search);
+  const seed = params.get('seed')?.replace(/_/g, ' ').trim() || null;
   return {
-    seed: params.get('seed'),
+    seed,
     depth: parseBoundedNumber(params.get('depth'), DEFAULT_DEPTH, 1, 3),
     maxNodes: parseBoundedNumber(params.get('nodes'), DEFAULT_MAX_NODES, 50, 500),
   };

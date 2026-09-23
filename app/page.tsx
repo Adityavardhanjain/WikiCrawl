@@ -102,6 +102,31 @@ function validateGraphData(data: Partial<CrawlResult> | null | undefined): strin
   return issues;
 }
 
+function createSeedPreview(title: string): CrawlResult {
+  const normalizedTitle = title.trim().replace(/_/g, ' ');
+  const seed: WikiNode = {
+    id: normalizedTitle,
+    title: normalizedTitle,
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(normalizedTitle.replace(/ /g, '_'))}`,
+    depth: 0,
+    inDegree: 0,
+    outDegree: 0,
+    pagerank: 1,
+    betweenness: 0,
+    communityId: 0,
+  };
+
+  return {
+    id: 'streaming',
+    seedId: normalizedTitle,
+    nodes: [seed],
+    edges: [],
+    communities: [],
+    crawledAt: new Date().toISOString(),
+    positions: {},
+  };
+}
+
 async function readCrawlResponse(
   response: Response,
   onProgress?: (progress: CrawlProgress) => void,
@@ -193,6 +218,7 @@ export default function Home() {
   const [pathSelection, setPathSelection] = useState<{ from: string; to: string; result: PathResult | null } | null>(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
+  const [seedPreview, setSeedPreview] = useState(false);
   const previousDataRef = useRef<CrawlResult | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [crawlWarning, setCrawlWarning] = useState<number | null>(null);
@@ -277,14 +303,17 @@ export default function Home() {
             updateLoadingProgress(progress);
           },
           {
-            onNodes: (nodes) => mergeLiveData(request, (current) => ({
-              ...current,
-              nodes: (() => {
-                const merged = new Map(current.nodes.map((node) => [node.id, node]));
-                for (const node of nodes) if (node?.id) merged.set(node.id, node);
-                return [...merged.values()];
-              })(),
-            })),
+            onNodes: (nodes) => {
+              if (nodes.length > 0 && isCurrentRequest()) setSeedPreview(false);
+              mergeLiveData(request, (current) => ({
+                ...current,
+                nodes: (() => {
+                  const merged = new Map(current.nodes.map((node) => [node.id, node]));
+                  for (const node of nodes) if (node?.id) merged.set(node.id, node);
+                  return [...merged.values()];
+                })(),
+              }));
+            },
             onEdges: (edges) => mergeLiveData(request, (current) => ({
               ...current,
               edges: (() => {
@@ -350,7 +379,7 @@ export default function Home() {
   const crawlStatus = error
     ? `Crawl error: ${error instanceof Error ? error.message : 'unable to load pages'}`
     : isLoading
-      ? `Crawl in progress: ${displayData?.nodes.length ?? 0} pages found`
+      ? `Crawl in progress: ${Math.max(0, (displayData?.nodes.length ?? 0) - (seedPreview ? 1 : 0))} pages found`
       : data
         ? `Crawl complete: ${data.nodes.length} pages found`
         : '';
@@ -467,7 +496,8 @@ export default function Home() {
       window.cancelAnimationFrame(liveUpdateFrameRef.current);
       liveUpdateFrameRef.current = null;
     }
-    setLiveData(null);
+    setLiveData(createSeedPreview(title));
+    setSeedPreview(true);
     setLoadingProgress(0);
     setGraphError(null);
     setCrawlWarning(null);
@@ -583,6 +613,8 @@ export default function Home() {
       const request = createCrawlRequest(seed, urlDepth, urlMaxNodes, ++requestNonceRef.current);
       submittedRequestRef.current = request;
       setSubmittedRequest(request);
+      setLiveData(createSeedPreview(seed));
+      setSeedPreview(true);
     }
   }, []);
 
@@ -602,7 +634,7 @@ export default function Home() {
       
       {/* Header */}
       <header className="app-header relative z-20 flex-shrink-0 glass border-b border-white/10 px-6 py-4">
-        <div className="max-w-7xl mx-auto">
+        <div className="header-inner max-w-7xl mx-auto">
           {isLoading && !displayData && (
             <div className="mb-4">
               <div className="mb-2 flex items-center justify-between text-xs text-slate-300">
@@ -617,18 +649,17 @@ export default function Home() {
               </div>
             </div>
           )}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-4">
+          <div className="header-topline flex items-center justify-between mb-4">
+            <div className="app-brand flex items-center gap-4">
               {/* Animated logo */}
               <div className="relative">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 via-purple-500 to-pink-500 p-[2px]">
+                <div className="app-brand-mark w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 via-purple-500 to-pink-500 p-[2px]">
                   <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
                     <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                     </svg>
                   </div>
                 </div>
-                <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-xl blur opacity-40 -z-10 animate-pulse" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold">
@@ -640,24 +671,23 @@ export default function Home() {
             </div>
             
             {/* Color mode toggle with animated background */}
-            <div className="relative flex items-center gap-1 bg-slate-800/50 rounded-xl p-1.5 border border-white/10">
-              <div 
-                className={`absolute h-[calc(100%-12px)] bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg transition-all duration-300 ${
-                  colorMode === 'community' ? 'left-1.5 w-[90px]' : 'left-[108px] w-[60px]'
-                }`}
-              />
+            <div className="mode-switch relative flex items-center gap-1 bg-slate-800/50 rounded-xl p-1.5 border border-white/10" role="group" aria-label="Graph color mode">
               <button
+                type="button"
+                aria-pressed={colorMode === 'community'}
                 onClick={() => setColorMode('community')}
-                className={`relative z-10 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  colorMode === 'community' ? 'text-white' : 'text-slate-400 hover:text-white'
+                className={`mode-switch-button relative z-10 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  colorMode === 'community' ? 'is-active text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 Community
               </button>
               <button
+                type="button"
+                aria-pressed={colorMode === 'depth'}
                 onClick={() => setColorMode('depth')}
-                className={`relative z-10 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  colorMode === 'depth' ? 'text-white' : 'text-slate-400 hover:text-white'
+                className={`mode-switch-button relative z-10 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  colorMode === 'depth' ? 'is-active text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 Depth
@@ -666,11 +696,11 @@ export default function Home() {
           </div>
           
           {/* Search and controls */}
-          <div className="flex gap-6 header-search-controls">
+          <div className="header-search-controls">
             <div className="flex-1">
               <SeedSearch onSearch={handleSearch} isLoading={isLoading} />
             </div>
-            <div className="w-96 header-crawl-controls">
+            <div className="header-crawl-controls">
               <button
                 type="button"
                 className="options-toggle atlas-mobile-button"
@@ -698,17 +728,24 @@ export default function Home() {
       </header>
 
       {/* Main content */}
-      <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden relative z-10">
+      <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden relative z-30">
         {/* Graph area */}
         <div className="flex-1 min-h-0 min-w-0 relative">
           {isLoading && !displayData && (
             <div className="creation-stage absolute inset-0 flex items-center justify-center px-6 z-50">
-              <div className="creation-card w-full max-w-lg">
+              <div className="creation-card w-full max-w-lg" role="status" aria-live="polite" aria-busy="true">
                 <div className="creation-card-mark" aria-hidden="true">{'///'}</div>
                 <p className="creation-kicker">New field note</p>
                 <h3>Building your map</h3>
                 <p className="creation-stage-label">{creationStage}</p>
-                <div className="creation-progress" aria-hidden="true">
+                <div
+                  className="creation-progress"
+                  role="progressbar"
+                  aria-label="Wikipedia crawl progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(displayProgress * 100)}
+                >
                   <span style={{ width: `${displayProgress * 100}%` }} />
                 </div>
                 <div className="creation-meta">
@@ -721,9 +758,10 @@ export default function Home() {
 
           {isLoading && displayData && (
             <div className="absolute inset-x-4 top-4 z-30 flex justify-center">
-              <div className="flex items-center gap-3 rounded-full border border-cyan-500/30 bg-slate-950/80 px-4 py-2 text-xs text-cyan-200 shadow-lg backdrop-blur-md">
+              <div className="streaming-status flex items-center gap-3 rounded-full border border-cyan-500/30 bg-slate-950/80 px-4 py-2 text-xs text-cyan-200 shadow-lg backdrop-blur-md" role="status" aria-live="polite">
+                <span className="streaming-indicator" aria-hidden="true" />
                 <span>{creationStage}</span>
-                <span className="w-24 text-right tabular-nums transition-opacity duration-300">{Math.round(displayProgress * 100)}%</span>
+                <span className="w-28 text-right tabular-nums transition-opacity duration-300">{Math.round(displayProgress * 100)}% mapped</span>
                 <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/80">
                   <span
                     className="block h-full rounded-full bg-cyan-400 transition-[width] duration-300 ease-out"
@@ -735,8 +773,8 @@ export default function Home() {
           )}
 
           {notFound && (
-            <div className="absolute inset-0 flex items-center justify-center px-6">
-              <div className="glass-strong max-w-lg rounded-2xl border border-cyan-500/30 p-8 text-center">
+            <div className="absolute inset-0 z-40 flex items-center justify-center px-6">
+              <div className="glass-strong w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-cyan-500/30 p-8 text-center">
                 <p className="mb-2 text-lg font-semibold text-cyan-300">No Wikipedia article named &quot;{notFound.title}&quot;</p>
                 <p className="mb-5 text-sm text-slate-400">Try one of these related articles:</p>
                 <div className="flex flex-wrap justify-center gap-2">
@@ -756,7 +794,7 @@ export default function Home() {
           )}
 
           {error && !notFound && !displayData && (
-            <div className="absolute inset-0 flex items-center justify-center">
+            <div className="absolute inset-0 z-40 flex items-center justify-center">
               <div className="text-center p-8 glass-strong rounded-2xl max-w-md border border-red-500/30">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
                   <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -786,7 +824,8 @@ export default function Home() {
                 colorMode={colorMode}
                 onNodeClick={handleNodeClick}
                 focusedNode={focusedNode}
-                                focusedCommunityId={focusedCommunityId}
+                isStreaming={isLoading}
+                focusedCommunityId={focusedCommunityId}
                 path={pathSelection?.result ?? null}
                 isExpanded={expandedNodeIds.size > 0}
               />

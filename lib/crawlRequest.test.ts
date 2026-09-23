@@ -22,4 +22,12 @@ describe('crawl requests', () => {
   it('uses defaults for missing URL values', () => {
       expect(parseCrawlParams('?seed=A')).toEqual({ seed: 'A', depth: 2, maxNodes: 150 });
   });
+
+  it('converts Wikipedia URL underscores to title spaces', () => {
+    expect(parseCrawlParams('?seed=Alan_Turing')).toEqual({
+      seed: 'Alan Turing',
+      depth: 2,
+      maxNodes: 150,
+    });
+  });
 });

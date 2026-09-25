@@ -8,6 +8,7 @@ import { GraphCanvas } from './GraphCanvas';
 
 const cameraReset = vi.hoisted(() => vi.fn());
 const sigmaHandlers = vi.hoisted(() => new Map<string, (...args: unknown[]) => void>());
+const forceLayoutCalls = vi.hoisted(() => [] as Array<{ changeKey: string; newNodeIds: string[] }>);
 
 vi.mock('sigma', () => ({
   Sigma: class MockSigma {
@@ -41,7 +42,10 @@ vi.mock('sigma/rendering', () => ({
 vi.mock('./useForceLayout', () => ({
   getRememberedPositions: () => undefined,
   seedInitialPositions: () => new Map(),
-  useForceLayout: () => ({ arranging: false, paused: false, togglePause: vi.fn() }),
+  useForceLayout: (_graph: unknown, options: { changeKey: string; newNodeIds: string[] }) => {
+    forceLayoutCalls.push({ changeKey: options.changeKey, newNodeIds: [...options.newNodeIds] });
+    return { arranging: false, paused: false, togglePause: vi.fn() };
+  },
 }));
 
 vi.mock('./useNodeSummary', () => ({
@@ -69,6 +73,7 @@ describe('GraphCanvas DOM ownership', () => {
     cleanup();
     vi.restoreAllMocks();
     sigmaHandlers.clear();
+    forceLayoutCalls.length = 0;
   });
 
   it('keeps React overlays outside the Sigma container', () => {
@@ -131,5 +136,37 @@ describe('GraphCanvas DOM ownership', () => {
     rerender(<GraphCanvas {...props} data={completeData} isStreaming />);
 
     await waitFor(() => expect(cameraReset).toHaveBeenCalledTimes(1));
+  });
+
+  it('restarts layout for expanded nodes while keeping existing nodes fixed', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
+    const initialData = makeData();
+    const props = {
+      colorMode: 'community' as const,
+      onNodeClick: vi.fn(),
+      focusedNode: null,
+      path: null,
+    };
+    const { rerender } = render(<GraphCanvas {...props} data={initialData} />);
+
+    await waitFor(() => expect(forceLayoutCalls.at(-1)?.changeKey).toBe('A:1'));
+    forceLayoutCalls.length = 0;
+    rerender(
+      <GraphCanvas
+        {...props}
+        data={{
+          ...initialData,
+          nodes: [
+            ...initialData.nodes,
+            { id: 'C', title: 'C', url: '', depth: 2, inDegree: 0, outDegree: 1, pagerank: 0.1, betweenness: 0, communityId: 0 },
+          ],
+          edges: [...initialData.edges, { source: 'B', target: 'C' }],
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(forceLayoutCalls.at(-1)?.changeKey).toBe('A:2'));
+    expect(forceLayoutCalls.at(-1)?.newNodeIds).toEqual(['C']);
   });
 });

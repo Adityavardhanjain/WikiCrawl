@@ -61,6 +61,7 @@ export function GraphCanvas({
   const topRankIdsRef = useRef(new Set<string>());
   const hubIdsRef = useRef(new Set<string>());
   const maxDegreeRef = useRef(1);
+  const compactLabelsRef = useRef(false);
   const showAllEdgesRef = useRef(false);
   const showArrowsRef = useRef(false);
   const pathNodeIdsRef = useRef(new Set<string>());
@@ -164,14 +165,16 @@ export function GraphCanvas({
     }
 
     const graph = graphRef.current;
+    const compactLabels = window.innerWidth <= 700;
+    compactLabelsRef.current = compactLabels;
     const sigma = new Sigma(graph, mountContainer, {
       renderLabels: true,
       labelFont: 'var(--font-display)',
       labelSize: 12,
       labelColor: { color: '#e2e8f0' },
       labelWeight: '600',
-      labelDensity: 0.08,
-      labelGridCellSize: 90,
+      labelDensity: compactLabels ? 0.008 : 0.08,
+      labelGridCellSize: compactLabels ? 220 : 90,
       defaultEdgeColor: 'rgba(148, 163, 184, 0.2)',
       defaultNodeColor: '#67e8f9',
       minCameraRatio: 0.22,
@@ -294,7 +297,7 @@ export function GraphCanvas({
         return {
           ...nodeAttributes,
           label: nodeData.title,
-          forceLabel: isTopRanked,
+          forceLabel: isTopRanked && !compactLabelsRef.current,
         };
       },
       edgeReducer: (edge, edgeAttributes) => {
@@ -351,12 +354,20 @@ export function GraphCanvas({
     });
 
     sigmaRef.current = sigma;
+    const updateResponsiveLabelDensity = () => {
+      const isCompact = window.innerWidth <= 700;
+      if (compactLabelsRef.current === isCompact) return;
+      compactLabelsRef.current = isCompact;
+      sigma.setSetting('labelDensity', isCompact ? 0.008 : 0.08);
+      sigma.setSetting('labelGridCellSize', isCompact ? 220 : 90);
+    };
+    window.addEventListener('resize', updateResponsiveLabelDensity);
 
     const updateCommunityLabels = () => {
       if (communityFrameRef.current !== null) return;
       communityFrameRef.current = window.requestAnimationFrame(() => {
         communityFrameRef.current = null;
-        if (sigma.getCamera().getState().ratio < 0.45) {
+        if (compactLabelsRef.current || sigma.getCamera().getState().ratio < 0.45) {
           setCommunityLabels([]);
           return;
         }
@@ -443,6 +454,7 @@ export function GraphCanvas({
 
     return () => {
       container.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('resize', updateResponsiveLabelDensity);
       if (tooltipFrameRef.current !== null) window.cancelAnimationFrame(tooltipFrameRef.current);
       if (hoverDwellTimeoutRef.current) clearTimeout(hoverDwellTimeoutRef.current);
       sigma.getCamera().removeListener('updated', updateCommunityLabels);
@@ -489,9 +501,11 @@ export function GraphCanvas({
     } else if (isFirstGraphSync) {
       pendingNewNodeIdsRef.current = result.addedNodeIds;
     } else if (result.addedNodeIds.length > 0) {
-      pendingNewNodeIdsRef.current = [...new Set([...pendingNewNodeIdsRef.current, ...result.addedNodeIds])];
+      pendingNewNodeIdsRef.current = isStreaming
+        ? [...new Set([...pendingNewNodeIdsRef.current, ...result.addedNodeIds])]
+        : result.addedNodeIds;
     }
-    if (isFirstGraphSync || result.seedChanged) {
+    if (isFirstGraphSync || result.seedChanged || (!isStreaming && result.addedNodeIds.length > 0)) {
       setLayoutRevision((revision) => revision + 1);
     }
     previousShapeRef.current = { seedId: data.seedId, nodes: data.nodes.length, edges: edgeCount };

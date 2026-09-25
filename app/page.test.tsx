@@ -437,6 +437,10 @@ it('resets expanded-node state when starting Go deeper', async () => {
     ).toBeInTheDocument();
   });
 
+  await waitFor(() => {
+    expect(screen.getByText('Crawl complete: 3 pages found')).toBeInTheDocument();
+  });
+
   // Open the crawl controls.
   fireEvent.click(
     screen.getByRole('button', { name: /Options/i }),

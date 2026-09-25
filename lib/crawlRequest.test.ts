@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCrawlRequest, getCrawlPayload, parseCrawlParams } from './crawlRequest';
+import { buildExpandRequestBody, createCrawlRequest, getCrawlPayload, parseCrawlParams } from './crawlRequest';
 
 describe('crawl requests', () => {
   it('creates a new request for the same seed with changed settings', () => {
@@ -28,6 +28,30 @@ describe('crawl requests', () => {
       seed: 'Alan Turing',
       depth: 2,
       maxNodes: 150,
+    });
+  });
+
+  it('preserves selected expansion depth and respects the API minimum node budget', () => {
+    const request = buildExpandRequestBody('B', {
+      id: 'graph',
+      seedId: 'A',
+      nodes: [
+        { id: 'A', title: 'A', url: '', depth: 0, inDegree: 0, outDegree: 1, pagerank: 0, betweenness: 0, communityId: 0 },
+        { id: 'B', title: 'B', url: '', depth: 1, inDegree: 1, outDegree: 0, pagerank: 0, betweenness: 0, communityId: 0 },
+      ],
+      edges: [{ source: 'A', target: 'B' }],
+      communities: [],
+      crawledAt: '',
+      positions: {},
+    }, 3, 50);
+
+    expect(request).toMatchObject({
+      seedTitle: 'B',
+      depth: 3,
+      maxNodes: 50,
+      knownNodeIds: ['A', 'B'],
+      knownEdgeIndexPairs: [[0, 1]],
+      baseDepth: 1,
     });
   });
 });

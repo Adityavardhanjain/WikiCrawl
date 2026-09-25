@@ -69,8 +69,8 @@ export function buildExpandRequestBody(
   const expandedNode = data.nodes.find((node) => node.id === nodeId);
   return {
     seedTitle: nodeId,
-    depth: Math.min(depth, 2),
-    maxNodes: Math.floor(maxNodes / 2),
+    depth,
+    maxNodes: Math.max(50, Math.floor(maxNodes / 2)),
     knownNodeIds,
     knownEdgeIndexPairs,
     baseDepth: expandedNode?.depth ?? 0,

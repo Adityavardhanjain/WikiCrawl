@@ -1349,30 +1349,34 @@ body { color: var(--paper); }
 }
 
 @media (max-width: 700px) {
-  .app-header { padding: 0.8rem 0.9rem 0.9rem; }
+  .app-header { padding: 0.65rem 0.9rem 0.75rem; }
   .header-inner { max-width: none; }
-  .header-topline { min-height: 2.7rem; align-items: center; gap: 0.5rem; margin-bottom: 0.85rem; }
+  .header-topline { min-height: 2.5rem; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
   .app-brand { gap: 0.65rem; }
-  .app-brand-mark { width: 2.45rem; height: 2.45rem; }
-  .app-brand h1 { font-size: 1rem; }
-  .app-brand p { margin-top: 0.2rem; font-size: 0.66rem; }
+  .app-brand-mark { width: 2.2rem; height: 2.2rem; }
+  .app-brand h1 { font-size: 0.95rem; }
+  .app-brand p { margin-top: 0.1rem; font-size: 0.62rem; }
   .mode-switch .mode-switch-button { min-height: 2rem; padding: 0.35rem 0.55rem; font-size: 0.62rem; }
-  .header-search-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
+  .header-search-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.4rem; }
+  .header-search-controls > div:first-child { min-width: 0; }
+  .header-crawl-controls { display: contents; }
   .seed-search-form { gap: 0.45rem; }
-  .app-shell .seed-search-input { min-height: 3rem; padding: 0.7rem 2.6rem; font-size: 0.85rem; }
-  .seed-search-submit { min-width: 6.25rem; min-height: 3rem; padding-inline: 0.8rem; }
-  .header-crawl-controls { width: 100%; }
-  .options-toggle { margin: 0; padding: 0.55rem 0; border-color: var(--line); color: var(--signal); }
-  .crawl-options-open { padding: 0.7rem 0 0.15rem; }
+  .app-shell .seed-search-input { min-height: 2.75rem; padding: 0.6rem 2.5rem; font-size: 0.82rem; }
+  .seed-search-submit { min-width: 5.6rem; min-height: 2.75rem; padding-inline: 0.65rem; }
+  .options-toggle { width: auto; min-height: 2.75rem; margin: 0; padding: 0 0.55rem; gap: 0.35rem; border: 1px solid var(--line); color: var(--signal); white-space: nowrap; }
+  #crawl-options.crawl-options-open { grid-column: 1 / -1; width: 100%; padding: 0.55rem 0 0.1rem; }
   .crawl-control-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.75rem 1rem; }
   .crawl-deeper-button { grid-column: 1 / -1; width: 100%; }
-  .graph-toolbar { top: 0.7rem; right: 0.7rem; left: 0.7rem; flex-wrap: wrap; justify-content: flex-end; gap: 0.15rem; }
-  .graph-toolbar .graph-control { min-width: 2rem; height: 2.1rem; padding-inline: 0.45rem; }
-  .graph-toolbar .graph-control-wide { min-width: 2.55rem; }
-  .graph-legend { top: auto; bottom: 4.4rem; left: 0.7rem; width: min(15rem, calc(100vw - 1.4rem)); max-height: min(37vh, 17rem); padding: 0.7rem; }
-  .graph-legend-community-list { max-height: 7rem; }
+  .graph-toolbar { top: 0.55rem; right: 0.55rem; left: auto; max-width: calc(100vw - 1.1rem); flex-wrap: nowrap; justify-content: flex-end; gap: 0.1rem; padding: 0.2rem; }
+  .graph-toolbar .graph-control { min-width: 1.85rem; height: 1.9rem; padding-inline: 0.3rem; font-size: 0.66rem; }
+  .graph-toolbar .graph-control-wide { min-width: 2.25rem; }
+  .graph-legend { top: auto; bottom: 0.7rem; left: 0.65rem; display: flex; align-items: center; gap: 0.8rem; width: max-content; max-width: calc(100vw - 1.3rem); max-height: none; overflow: hidden; padding: 0.45rem 0.6rem; }
+  .graph-legend > div:first-child,
+  .graph-legend > div:not(:first-child):not(:nth-child(2)):not(:last-child) { display: none; }
+  .graph-legend > div:nth-child(2),
+  .graph-legend > div:last-child { margin: 0; gap: 0.35rem; white-space: nowrap; }
   .graph-gesture-key { display: none; }
-  .streaming-status { max-width: calc(100vw - 1.5rem); gap: 0.55rem; padding: 0.55rem 0.7rem; font-size: 0.65rem; }
+  .streaming-status { top: 3rem; max-width: calc(100vw - 1.5rem); gap: 0.45rem; padding: 0.45rem 0.6rem; font-size: 0.62rem; }
   .streaming-status > span:nth-child(2) { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .streaming-status > span:nth-child(3) { flex: 0 0 auto; white-space: nowrap; }
   .streaming-status > span:last-child { flex: 0 0 3.5rem; }

@@ -650,6 +650,12 @@ export default function Home() {
                   <span className="text-white/90"> / field notes</span>
                 </h1>
                 <p className="text-sm text-cyan-400/80">A visual index of unexpected connections</p>
+                <p className="text-xs text-slate-400">
+                  Created by{' '}
+                  <a href="https://www.linkedin.com/in/adityavardhan-jain/" target="_blank" rel="noopener noreferrer" className="text-slate-300 hover:text-white">
+                    Adityavardhan Jain
+                  </a>
+                </p>
               </div>
             </div>
             
@@ -809,6 +815,7 @@ export default function Home() {
                 onStageClick={handleCloseSelection}
                 focusedNode={focusedNode}
                 isStreaming={isLoading}
+                reduceEffects={reduceEffects}
                 focusedCommunityId={focusedCommunityId}
                 path={pathSelection?.result ?? null}
                 isExpanded={expandedNodeIds.size > 0}

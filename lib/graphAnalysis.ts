@@ -16,6 +16,21 @@ export interface GraphAnalysisResult {
   communities: Community[];
 }
 
+export function hslToRgbColor(hue: number, saturation: number, lightness: number): string {
+  const normalizedHue = ((hue % 360) + 360) % 360 / 360;
+  const normalizedSaturation = saturation / 100;
+  const normalizedLightness = lightness / 100;
+  const channel = (offset: number) => {
+    const value = (offset + normalizedHue * 12) % 12;
+    const chroma = normalizedSaturation * Math.min(normalizedLightness, 1 - normalizedLightness);
+    return Math.round(255 * (
+      normalizedLightness - chroma * Math.max(-1, Math.min(value - 3, 9 - value, 1))
+    ));
+  };
+
+  return `rgb(${channel(0)}, ${channel(8)}, ${channel(4)})`;
+}
+
 export function buildUndirectedGraph(source: Graph): Graph {
   const graph = new Graph({ type: 'undirected', multi: false });
 
@@ -136,7 +151,7 @@ export function getCommunityColor(communityId: number, totalCommunities: number)
   }
   // Generate a color for large number of communities
   const hue = (communityId * 137.508) % 360;
-  return `hsl(${hue}, 70%, 60%)`;
+  return hslToRgbColor(hue, 70, 60);
 }
 
 export function getNodeColor(
@@ -156,7 +171,7 @@ export function getNodeColor(
     if (node.depth < 0) return '#888888'; // Unknown depth
     const ratio = node.depth / Math.max(maxDepth, 1);
     const hue = (1 - ratio) * 120; // 120 = green, 0 = red
-    return `hsl(${hue}, 70%, 50%)`;
+    return hslToRgbColor(hue, 70, 50);
   }
 }
 

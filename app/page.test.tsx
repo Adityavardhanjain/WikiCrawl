@@ -168,6 +168,7 @@ function runPendingFrames() {
       </QueryClientProvider>,
     );
 
+    expect(screen.getByRole('link', { name: 'Adityavardhan Jain' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Jazz' }));
     await waitFor(() => expect(crawlChannels).toHaveLength(1));
 

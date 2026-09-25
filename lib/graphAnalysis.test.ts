@@ -1,6 +1,6 @@
 import Graph from 'graphology';
 import { describe, expect, it } from 'vitest';
-import { getNodeSize, getShortestPath } from './graphAnalysis';
+import { getCommunityColor, getNodeColor, getNodeSize, getShortestPath } from './graphAnalysis';
 
 function makeGraph() {
   const graph = new Graph({ type: 'directed' });
@@ -45,5 +45,20 @@ describe('PageRank node sizing', () => {
     expect(getNodeSize(0.1, 5, 17, ranks)).toBe(5);
     expect(getNodeSize(0.2, 5, 17, ranks)).toBeCloseTo(5 + Math.sqrt(1 / 3) * 12);
     expect(getNodeSize(0.4, 5, 17, ranks)).toBe(17);
+  });
+});
+
+describe('Sigma-compatible generated node colors', () => {
+  it('uses rgb colors when the community palette exceeds its fixed colors', () => {
+    expect(getCommunityColor(20, 21)).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+  });
+
+  it('uses rgb colors for depth coloring', () => {
+    const node = {
+      id: 'B', title: 'B', url: '', depth: 1,
+      inDegree: 0, outDegree: 0, pagerank: 0, betweenness: 0, communityId: 0,
+    };
+
+    expect(getNodeColor(node, 'depth', 'A', 2)).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
   });
 });

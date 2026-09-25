@@ -74,6 +74,28 @@ describe('syncGraphData', () => {
     expect(merged.nodes.find((candidate) => candidate.id === 'new')?.depth).toBe(2);
   });
 
+  it('recomputes root-relative depths when expansion reveals a shorter directed route', () => {
+    const base = data(
+      [
+        node('seed', 0), node('branch', 1), node('expanded', 2),
+        node('via-one', 1), node('via-two', 2), node('via-three', 3), node('target', 4),
+      ],
+      [
+        { source: 'seed', target: 'branch' },
+        { source: 'branch', target: 'expanded' },
+        { source: 'seed', target: 'via-one' },
+        { source: 'via-one', target: 'via-two' },
+        { source: 'via-two', target: 'via-three' },
+        { source: 'via-three', target: 'target' },
+      ],
+    );
+    const update = data([], [{ source: 'expanded', target: 'target' }]);
+
+    const merged = mergeGraphData(base, update);
+
+    expect(merged.nodes.find((candidate) => candidate.id === 'target')?.depth).toBe(3);
+  });
+
   it('adds nodes without moving existing nodes and drops removed nodes', () => {
     const graph = new Graph({ type: 'directed' });
     syncGraphData(graph, data([node('seed'), node('old')], [{ source: 'seed', target: 'old' }]), options);

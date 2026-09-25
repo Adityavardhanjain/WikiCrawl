@@ -6,7 +6,7 @@ import { Sigma } from 'sigma';
 import { EdgeArrowProgram, EdgeLineProgram } from 'sigma/rendering';
 import type { CrawlResult, WikiNode, PathResult } from '@/types/graph';
 import { getFocusCameraTarget } from '@/lib/cameraFocus';
-import { getCommunityColor, getNodeSize } from '@/lib/graphAnalysis';
+import { getCommunityColor, getNodeSize, hslToRgbColor } from '@/lib/graphAnalysis';
 import { syncGraphData } from '@/lib/graphSync';
 import { computeRobustBounds } from '@/lib/layoutMetrics';
 import { seedInitialPositions } from '@/lib/layoutSeed';
@@ -14,6 +14,13 @@ import { getRememberedPositions, useForceLayout } from './useForceLayout';
 import { useNodeSummary, usePrefetchNodeSummary } from './useNodeSummary';
 
 const HOVER_PREFETCH_DWELL_MS = 300;
+const NODE_ARRIVAL_DURATION_MS = 240;
+const NODE_ARRIVAL_STAGGER_MS = 32;
+
+interface NodeArrival {
+  startedAt: number;
+  delay: number;
+}
 
 interface GraphCanvasProps {
   data: CrawlResult;
@@ -25,6 +32,7 @@ interface GraphCanvasProps {
   isStreaming?: boolean;
   isExpanded?: boolean;
   focusedCommunityId?: number | null;
+  reduceEffects?: boolean;
 }
 
 export function GraphCanvas({
@@ -37,6 +45,7 @@ export function GraphCanvas({
   isStreaming = false,
   isExpanded = false,
   focusedCommunityId = null,
+  reduceEffects = false,
 }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef(new Graph({ type: 'directed', multi: false }));
@@ -71,6 +80,8 @@ export function GraphCanvas({
   const communityFrameRef = useRef<number | null>(null);
   const updateCommunityLabelsRef = useRef<() => void>(() => undefined);
   const pendingNewNodeIdsRef = useRef<string[]>([]);
+  const nodeArrivalsRef = useRef(new Map<string, NodeArrival>());
+  const nodeArrivalFrameRef = useRef<number | null>(null);
   const initialCameraFitPendingRef = useRef(false);
   const previousShapeRef = useRef({ seedId: '', nodes: 0, edges: 0 });
   const [layoutRevision, setLayoutRevision] = useState(0);
@@ -165,6 +176,7 @@ export function GraphCanvas({
     }
 
     const graph = graphRef.current;
+    const nodeArrivals = nodeArrivalsRef.current;
     const compactLabels = window.innerWidth <= 700;
     compactLabelsRef.current = compactLabels;
     const sigma = new Sigma(graph, mountContainer, {
@@ -182,7 +194,15 @@ export function GraphCanvas({
       hideLabelsOnMove: true,
       hideEdgesOnMove: dataRef.current.edges.length > 4 * Math.max(dataRef.current.nodes.length, 1),
       labelRenderedSizeThreshold: 6,
-      nodeReducer: (node, nodeAttributes) => {
+      nodeReducer: (node, attributes) => {
+        const arrival = nodeArrivalsRef.current.get(node);
+        const arrivalProgress = arrival
+          ? Math.max(0, Math.min(1, (performance.now() - arrival.startedAt - arrival.delay) / NODE_ARRIVAL_DURATION_MS))
+          : 1;
+        const arrivalEase = 1 - (1 - arrivalProgress) ** 3;
+        const nodeAttributes = arrival && node !== dataRef.current.seedId
+          ? { ...attributes, size: Math.max(0.01, Number(attributes.size) * arrivalEase) }
+          : attributes;
         const focusId = focusedNodeRef.current;
         const hoverId = hoveredNodeRef.current;
         const isRoot = node === dataRef.current.seedId;
@@ -456,6 +476,8 @@ export function GraphCanvas({
       container.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('resize', updateResponsiveLabelDensity);
       if (tooltipFrameRef.current !== null) window.cancelAnimationFrame(tooltipFrameRef.current);
+      if (nodeArrivalFrameRef.current !== null) window.cancelAnimationFrame(nodeArrivalFrameRef.current);
+      nodeArrivals.clear();
       if (hoverDwellTimeoutRef.current) clearTimeout(hoverDwellTimeoutRef.current);
       sigma.getCamera().removeListener('updated', updateCommunityLabels);
       graph.removeListener('eachNodeAttributesUpdated', updateCommunityLabels);
@@ -492,6 +514,32 @@ export function GraphCanvas({
       sizeForNode: (node) => getNodeSize(node.pagerank, 5, 18, rankValues),
       colorForNode: (node) => getNodeColor(node, data.seedId, colorModeRef.current, data.communities.length, maxDepth),
     });
+    if (isStreaming && !reduceEffects && result.addedNodeIds.length > 0) {
+      const startedAt = performance.now();
+      result.addedNodeIds.forEach((nodeId, index) => {
+        if (nodeId !== data.seedId) {
+          nodeArrivalsRef.current.set(nodeId, {
+            startedAt,
+            delay: index * NODE_ARRIVAL_STAGGER_MS,
+          });
+        }
+      });
+      if (nodeArrivalsRef.current.size > 0 && nodeArrivalFrameRef.current === null) {
+        const refreshArrivals = () => {
+          const now = performance.now();
+          for (const [nodeId, arrival] of nodeArrivalsRef.current) {
+            if (now - arrival.startedAt >= arrival.delay + NODE_ARRIVAL_DURATION_MS) {
+              nodeArrivalsRef.current.delete(nodeId);
+            }
+          }
+          sigmaRef.current?.refresh();
+          nodeArrivalFrameRef.current = nodeArrivalsRef.current.size > 0
+            ? window.requestAnimationFrame(refreshArrivals)
+            : null;
+        };
+        nodeArrivalFrameRef.current = window.requestAnimationFrame(refreshArrivals);
+      }
+    }
     focusNeighborsRef.current = focusedNodeRef.current && graph.hasNode(focusedNodeRef.current)
       ? new Set(graph.neighbors(focusedNodeRef.current))
       : new Set();
@@ -519,7 +567,7 @@ export function GraphCanvas({
       sigmaRef.current?.setCustomBBox(null);
       applyRobustBounds(true);
     }
-  }, [applyRobustBounds, colorMode, containerReady, data, edgeCount, isStreaming, maxDegree, maxDepth, rankValues]);
+  }, [applyRobustBounds, colorMode, containerReady, data, edgeCount, isStreaming, maxDegree, maxDepth, rankValues, reduceEffects]);
 
   const { arranging, paused, togglePause } = useForceLayout(graphRef.current, {
     seedId: data.seedId,
@@ -792,7 +840,7 @@ function getDepthColor(depth: number, maxDepth: number): string {
   if (depth < 0) return '#94a3b8';
   const ratio = depth / Math.max(maxDepth, 1);
   const hue = 178 - ratio * 22;
-  return `hsl(${hue}, 52%, 58%)`;
+  return hslToRgbColor(hue, 52, 58);
 }
 
 function getNodeColor(

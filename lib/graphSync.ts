@@ -30,12 +30,34 @@ export function mergeGraphData(base: CrawlResult, update: CrawlResult): CrawlRes
     edges.set(`${edge.source}|${edge.target}`, edge);
   }
 
+  const outgoingEdges = new Map<string, string[]>();
+  for (const edge of edges.values()) {
+    const targets = outgoingEdges.get(edge.source) ?? [];
+    targets.push(edge.target);
+    outgoingEdges.set(edge.source, targets);
+  }
+  const depths = new Map<string, number>([[base.seedId, 0]]);
+  const queue = [base.seedId];
+  for (let index = 0; index < queue.length; index += 1) {
+    const source = queue[index];
+    const nextDepth = depths.get(source)! + 1;
+    for (const target of outgoingEdges.get(source) ?? []) {
+      if (depths.has(target) || !nodes.has(target)) continue;
+      depths.set(target, nextDepth);
+      queue.push(target);
+    }
+  }
+  const mergedNodes = [...nodes.values()].map((node) => {
+    const depth = depths.get(node.id);
+    return depth === undefined || depth === node.depth ? node : { ...node, depth };
+  });
+
   return {
     ...base,
     ...update,
     // The expand endpoint's seed is the node being expanded, not the graph's original seed.
     seedId: base.seedId,
-    nodes: [...nodes.values()],
+    nodes: mergedNodes,
     edges: [...edges.values()],
     positions: { ...base.positions, ...update.positions },
   };

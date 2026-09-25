@@ -3,10 +3,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import type { Community, CrawlProgress, CrawlResult, WikiEdge, WikiNode, PathResult } from '@/types/graph';
+import type { Community, CrawlResult, WikiEdge, WikiNode, PathResult } from '@/types/graph';
 import { createCrawlRequest, getCrawlPayload, parseCrawlParams, buildExpandRequestBody, type CrawlRequest } from '@/lib/crawlRequest';
 import { mergeGraphData } from '@/lib/graphSync';
-import { toDisplayProgress } from '@/lib/progress';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
 import { MemoizedSidebar } from './components/Sidebar';
@@ -131,10 +130,10 @@ function createSeedPreview(title: string): CrawlResult {
 
 async function readCrawlResponse(
   response: Response,
-  onProgress?: (progress: CrawlProgress) => void,
   handlers?: {
     onNodes?: (nodes: WikiNode[]) => void;
     onEdges?: (edges: WikiEdge[]) => void;
+    onStage?: (stage: 'crawling' | 'analyzing') => void;
     onAnalysis?: (metrics: Record<string, Partial<WikiNode>>, communities: Community[]) => void;
     onWarning?: (failedTitles: string[]) => void;
   }
@@ -149,7 +148,6 @@ async function readCrawlResponse(
 
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/event-stream')) {
-    onProgress?.({ done: 1, target: 1 });
     return response.json() as Promise<CrawlResult>;
   }
 
@@ -175,16 +173,15 @@ async function readCrawlResponse(
 
       const payload = JSON.parse(dataLine.slice(5).trim());
       const event = eventLine?.slice(6).trim();
-      if (payload?.progress && onProgress) {
-        onProgress(payload.progress as CrawlProgress);
-      }
       if (event === 'nodes') handlers?.onNodes?.(payload.nodes ?? []);
       if (event === 'edges') handlers?.onEdges?.(payload.edges ?? []);
+      if (event === 'stage' && (payload.stage === 'crawling' || payload.stage === 'analyzing')) {
+        handlers?.onStage?.(payload.stage);
+      }
       if (event === 'analysis') handlers?.onAnalysis?.(payload.metrics ?? {}, payload.communities ?? []);
       if (event === 'warning') handlers?.onWarning?.(payload.failedTitles ?? []);
       if (payload?.result) {
         finalResult = payload.result as CrawlResult;
-        if (event === 'done') onProgress?.({ done: 1, target: 1 });
       }
       if (payload?.error) throw new Error(payload.error);
     }
@@ -218,9 +215,9 @@ export default function Home() {
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
   const [focusedCommunityId, setFocusedCommunityId] = useState<number | null>(null);
   const [pathSelection, setPathSelection] = useState<{ from: string; to: string; result: PathResult | null } | null>(null);
-  const [loadingProgress, setLoadingProgress] = useState(0);
   const [liveData, setLiveData] = useState<CrawlResult | null>(null);
   const [seedPreview, setSeedPreview] = useState(false);
+  const [crawlStage, setCrawlStage] = useState<'crawling' | 'analyzing'>('crawling');
   const previousDataRef = useRef<CrawlResult | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [crawlWarning, setCrawlWarning] = useState<number | null>(null);
@@ -275,12 +272,6 @@ export default function Home() {
     }
   }, []);
 
-  const updateLoadingProgress = useCallback((progress: CrawlProgress) => {
-    const safeTarget = Math.max(progress.target, 1);
-    const ratio = Math.min(1, Math.max(0, progress.done / safeTarget));
-    setLoadingProgress((current) => Math.max(current, ratio));
-  }, []);
-
   // Query for crawl data
   const { data, isLoading, error, refetch } = useQuery<CrawlResult>({
     queryKey: submittedRequest
@@ -298,13 +289,10 @@ export default function Home() {
           body: JSON.stringify(getCrawlPayload(request)),
           signal,
         });
-        const result = await readCrawlResponse(
-          response,
-          (progress) => {
-            if (!isCurrentRequest()) return;
-            updateLoadingProgress(progress);
-          },
-          {
+        const result = await readCrawlResponse(response, {
+            onStage: (stage) => {
+              if (isCurrentRequest()) setCrawlStage(stage);
+            },
             onNodes: (nodes) => {
               if (nodes.length > 0 && isCurrentRequest()) setSeedPreview(false);
               mergeLiveData(request, (current) => ({
@@ -333,8 +321,7 @@ export default function Home() {
               if (!isCurrentRequest()) return;
               setCrawlWarning(failedTitles.length);
             },
-          },
-        );
+        });
         const issues = validateGraphData(result);
         if (issues.length > 0) throw new Error(issues[0]);
         return result;
@@ -370,14 +357,17 @@ export default function Home() {
   });
 
   const displayData = data ?? liveData ?? previousDataRef.current;
-  const displayProgress = toDisplayProgress(isLoading, loadingProgress);
-  const creationStage = !displayData
+  const creationStage = crawlStage === 'analyzing'
+    ? 'Ranking pages and finding communities'
+    : !displayData
     ? 'Opening a new trail'
     : liveData && liveData.nodes.length < 2
       ? 'Finding the first links'
       : liveData && liveData.communities.length === 0
-        ? 'Tracing connections'
+        ? 'Mapping connections'
         : 'Arranging the neighborhoods';
+  const streamingPageCount = liveData?.nodes.length ?? 0;
+  const streamingPageLabel = `${streamingPageCount} ${streamingPageCount === 1 ? 'page' : 'pages'} in map`;
   const crawlStatus = error
     ? `Crawl error: ${error instanceof Error ? error.message : 'unable to load pages'}`
     : isLoading
@@ -416,13 +406,6 @@ export default function Home() {
       setSelectedNodeId(null);
     }
   }, [displayData, selectedNodeId]);
-
-  useEffect(() => {
-    if (!isLoading) {
-      const timeout = window.setTimeout(() => setLoadingProgress(0), 300);
-      return () => window.clearTimeout(timeout);
-    }
-  }, [isLoading]);
 
   // Expand mutation
   const expandMutation = useMutation({
@@ -499,8 +482,8 @@ export default function Home() {
       liveUpdateFrameRef.current = null;
     }
     setLiveData(createSeedPreview(title));
+    setCrawlStage('crawling');
     setSeedPreview(true);
-    setLoadingProgress(0);
     setGraphError(null);
     setCrawlWarning(null);
     setNotFound(null);
@@ -527,8 +510,8 @@ export default function Home() {
     submittedRequestRef.current = request;
     setSubmittedRequest(request);
     setLiveData(null);
+    setCrawlStage('crawling');
     setExpandedNodeIds(new Set());
-    setLoadingProgress(0);
     setGraphError(null);
     setCrawlWarning(null);
   }, [data, depth, liveData, maxNodes, submittedRequest]);
@@ -612,6 +595,7 @@ export default function Home() {
     setMaxNodes(urlMaxNodes);
 
     if (seed) {
+      setCrawlStage('crawling');
       const request = createCrawlRequest(seed, urlDepth, urlMaxNodes, ++requestNonceRef.current);
       submittedRequestRef.current = request;
       setSubmittedRequest(request);
@@ -641,13 +625,10 @@ export default function Home() {
             <div className="mb-4">
               <div className="mb-2 flex items-center justify-between text-xs text-slate-300">
                 <span>Crawling Wikipedia</span>
-                <span>{Math.round(displayProgress * 100)}%</span>
+                <span>Still working</span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-700/80">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 transition-all duration-500 ease-out"
-                  style={{ width: `${displayProgress * 100}%` }}
-                />
+              <div className="creation-progress is-indeterminate" aria-hidden="true">
+                <span />
               </div>
             </div>
           )}
@@ -744,17 +725,17 @@ export default function Home() {
                 <h3>Building your map</h3>
                 <p className="creation-stage-label">{creationStage}</p>
                 <div
-                  className="creation-progress"
+                  className="creation-progress is-indeterminate"
                   role="progressbar"
                   aria-label="Wikipedia crawl progress"
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-valuenow={Math.round(displayProgress * 100)}
+                  aria-valuetext={`${streamingPageLabel}; crawl in progress`}
                 >
-                  <span style={{ width: `${displayProgress * 100}%` }} />
+                  <span />
                 </div>
                 <div className="creation-meta">
-                  <span>{Math.round(displayProgress * 100)}% mapped</span>
+                  <span>{streamingPageLabel}</span>
                   <span>Depth {depth} · up to {maxNodes} pages</span>
                 </div>
               </div>
@@ -766,12 +747,9 @@ export default function Home() {
               <div className="streaming-status flex items-center gap-3 rounded-full border border-cyan-500/30 bg-slate-950/80 px-4 py-2 text-xs text-cyan-200 shadow-lg backdrop-blur-md" role="status" aria-live="polite">
                 <span className="streaming-indicator" aria-hidden="true" />
                 <span>{creationStage}</span>
-                <span className="w-28 text-right tabular-nums transition-opacity duration-300">{Math.round(displayProgress * 100)}% mapped</span>
-                <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-700/80">
-                  <span
-                    className="block h-full rounded-full bg-cyan-400 transition-[width] duration-300 ease-out"
-                    style={{ width: `${displayProgress * 100}%` }}
-                  />
+                <span className="min-w-24 text-right tabular-nums">{streamingPageLabel}</span>
+                <span className="creation-progress is-indeterminate h-1.5 w-24" aria-hidden="true">
+                  <span />
                 </span>
               </div>
             </div>

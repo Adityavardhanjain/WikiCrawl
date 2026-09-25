@@ -942,6 +942,16 @@ body {
   transition: width 240ms ease-out;
 }
 
+.creation-progress.is-indeterminate span {
+  width: 34%;
+  animation: progress-travel 1.55s ease-in-out infinite alternate;
+}
+
+@keyframes progress-travel {
+  from { transform: translateX(-105%); }
+  to { transform: translateX(300%); }
+}
+
 .streaming-indicator {
   width: 0.45rem;
   height: 0.45rem;
@@ -958,6 +968,7 @@ body {
 }
 
 .reduce-effects .streaming-indicator { animation: none; }
+.reduce-effects .creation-progress.is-indeterminate span { animation: none; transform: translateX(95%); }
 
 .creation-meta {
   display: flex;
@@ -1287,6 +1298,7 @@ body { color: var(--paper); }
 .creation-stage-label { color: var(--signal-cool); }
 .creation-progress { height: 0.42rem; border-radius: 2px; background: rgba(237, 240, 231, 0.12); }
 .creation-progress span { position: relative; overflow: hidden; background: linear-gradient(90deg, var(--signal), var(--signal-cool)); }
+.creation-progress.is-indeterminate span { width: 34%; animation: progress-travel 1.55s ease-in-out infinite alternate; }
 .creation-progress span::after { position: absolute; inset: 0; content: ''; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.52), transparent); animation: progress-glint 1.7s ease-in-out infinite; }
 .creation-meta { color: var(--atlas-muted); font-variant-numeric: tabular-nums; }
 .streaming-status { border-color: rgba(119, 201, 189, 0.3); border-radius: 5px; background: rgba(17, 22, 19, 0.93); color: #bce7de; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28); }
@@ -1361,9 +1373,9 @@ body { color: var(--paper); }
   .graph-legend-community-list { max-height: 7rem; }
   .graph-gesture-key { display: none; }
   .streaming-status { max-width: calc(100vw - 1.5rem); gap: 0.55rem; padding: 0.55rem 0.7rem; font-size: 0.65rem; }
-  .streaming-status > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .streaming-status > span:nth-child(2) { width: 2.5rem; }
-  .streaming-status > span:last-child { width: 3.5rem; }
+  .streaming-status > span:nth-child(2) { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .streaming-status > span:nth-child(3) { flex: 0 0 auto; white-space: nowrap; }
+  .streaming-status > span:last-child { flex: 0 0 3.5rem; }
   .node-detail.mobile-sheet { inset: auto 0 0; width: 100%; max-width: none; max-height: min(82vh, 680px); max-height: min(82dvh, 680px); border-radius: 8px 8px 0 0; }
   .node-detail.mobile-sheet .max-h-96 { max-height: calc(82dvh - 4.5rem); }
   .atlas-sidebar.mobile-sheet { height: min(76vh, 600px); height: min(76dvh, 600px); border-radius: 8px 8px 0 0; }
@@ -1403,6 +1415,7 @@ body { color: var(--paper); }
   .creation-card,
   .atlas-empty-state,
   .node-tooltip,
+  .creation-progress.is-indeterminate span,
   .creation-progress span::after {
     animation: none !important;
   }

@@ -302,6 +302,7 @@ export async function POST(request: NextRequest) {
           const graph = buildGraph(validAnalysisNodes, validAnalysisEdges);
 
           const seedId = crawledSeedId;
+          sendStreamEvent(controller, 'stage', { stage: 'analyzing' });
           const { nodes: analyzedNodes, communities } = analyzeGraph(graph, seedId);
 
           const allMetrics = Object.fromEntries(analyzedNodes.map((node) => [node.id, {

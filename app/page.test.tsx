@@ -173,6 +173,32 @@ function runPendingFrames() {
 
     expect(screen.getByRole('button', { name: 'Explore article' })).toBeDisabled();
   });
+
+  it('shows live page counts and indeterminate activity instead of a stalled percentage', async () => {
+    window.history.replaceState({}, '', '/?seed=Alpha&depth=1&nodes=50');
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Home />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(crawlChannels).toHaveLength(1));
+    const crawl = crawlChannels[0];
+    expect(screen.getByText('1 page in map')).toBeInTheDocument();
+
+    crawl.emit('nodes', { nodes: [makeNode('Alpha'), makeNode('Beta')] });
+    await waitFor(() => expect(frameCallbacks.size).toBeGreaterThan(0));
+    runPendingFrames();
+
+    expect(await screen.findByText('2 pages in map')).toBeInTheDocument();
+    expect(screen.queryByText(/% mapped/)).not.toBeInTheDocument();
+    expect(document.querySelector('.creation-progress.is-indeterminate')).toBeInTheDocument();
+
+    crawl.emit('stage', { stage: 'analyzing' });
+    expect(await screen.findByText('Ranking pages and finding communities')).toBeInTheDocument();
+  });
+
   it('keeps a partially expanded node retryable and marks it expanded only after completion', async () => {
   window.history.replaceState(
     {},

@@ -193,7 +193,10 @@ it('still accepts a valid expansion request', async () => {
 
     const body = await response.text();
 
+    expect(body).toContain('event: stage\ndata: {"stage":"analyzing"}');
     expect(body).toContain('event: done');
+    expect(body.indexOf('event: stage')).toBeLessThan(body.indexOf('event: analysis'));
+    expect(body.indexOf('event: analysis')).toBeLessThan(body.indexOf('event: done'));
     expect(body).toContain('"result"');
   } finally {
     mock.restore();

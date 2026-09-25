@@ -19,6 +19,7 @@ interface GraphCanvasProps {
   data: CrawlResult;
   colorMode: 'community' | 'depth';
   onNodeClick: (node: WikiNode, shiftKey?: boolean) => void;
+  onStageClick?: () => void;
   focusedNode: string | null;
   path: PathResult | null;
   isStreaming?: boolean;
@@ -30,6 +31,7 @@ export function GraphCanvas({
   data,
   colorMode,
   onNodeClick,
+  onStageClick = () => undefined,
   focusedNode,
   path,
   isStreaming = false,
@@ -40,6 +42,7 @@ export function GraphCanvas({
   const graphRef = useRef(new Graph({ type: 'directed', multi: false }));
   const sigmaRef = useRef<Sigma | null>(null);
   const onNodeClickRef = useRef(onNodeClick);
+  const onStageClickRef = useRef(onStageClick);
   const dataRef = useRef(data);
   const [hoveredNode, setHoveredNode] = useState<WikiNode | null>(null);
   const hoveredSummary = useNodeSummary(hoveredNode?.id ?? null, { enabled: false });
@@ -134,12 +137,13 @@ export function GraphCanvas({
 
   useEffect(() => {
     onNodeClickRef.current = onNodeClick;
+    onStageClickRef.current = onStageClick;
     focusedNodeRef.current = focusedNode;
     focusNeighborsRef.current = focusedNode && graphRef.current.hasNode(focusedNode)
       ? new Set(graphRef.current.neighbors(focusedNode))
       : new Set();
     sigmaRef.current?.refresh();
-  }, [focusedNode, onNodeClick, data]);
+  }, [focusedNode, onNodeClick, onStageClick, data]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -417,6 +421,7 @@ export function GraphCanvas({
       const nodeData = graph.getNodeAttributes(node).raw as WikiNode;
       onNodeClickRef.current(nodeData, 'shiftKey' in event.original && event.original.shiftKey);
     });
+    sigma.on('clickStage', () => onStageClickRef.current());
 
     const container = sigma.getContainer();
     const handleMouseMove = (event: MouseEvent) => {

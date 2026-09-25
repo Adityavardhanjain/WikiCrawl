@@ -79,6 +79,24 @@ describe('SeedSearch', () => {
     expect(onSearch).toHaveBeenCalledWith('Zzzznotarealarticle');
   });
 
+  it('starts a search when a suggestion is clicked', async () => {
+    mockFetchJson([{ title: 'Climate change' }]);
+    const onSearch = vi.fn();
+    render(<SeedSearch onSearch={onSearch} isLoading={false} />);
+
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, { target: { value: 'Climate' } });
+    await waitFor(() => expect(screen.getByRole('option', { name: /Climate change/ })).toBeInTheDocument());
+
+    const suggestion = screen.getByRole('option', { name: /Climate change/ });
+    fireEvent.mouseDown(suggestion);
+    fireEvent.click(suggestion);
+
+    expect(onSearch).toHaveBeenCalledWith('Climate change');
+    await waitFor(() => expect(input).toHaveValue('Climate change'));
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
   it('does not render an empty dropdown while a search is still in flight', async () => {
     mockFetchJson([]);
     render(<SeedSearch onSearch={vi.fn()} isLoading={false} />);

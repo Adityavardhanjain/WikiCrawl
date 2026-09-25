@@ -514,8 +514,8 @@ export default function Home() {
 
   const handleGoDeeper = useCallback(() => {
     if (!submittedRequest || submittedRequest.depth >= 3) return;
-    const nextDepth = Math.min(3, submittedRequest.depth + 1);
-    const nextMaxNodes = Math.min(500, submittedRequest.maxNodes * 2);
+    const nextDepth = Math.min(3, Math.max(submittedRequest.depth + 1, depth));
+    const nextMaxNodes = maxNodes;
     previousDataRef.current = data ?? liveData;
     setDepth(nextDepth);
     setMaxNodes(nextMaxNodes);
@@ -531,7 +531,7 @@ export default function Home() {
     setLoadingProgress(0);
     setGraphError(null);
     setCrawlWarning(null);
-  }, [data, liveData, submittedRequest]);
+  }, [data, depth, liveData, maxNodes, submittedRequest]);
 
   // Handle node click
   const handleNodeClick = useCallback((node: WikiNode, shiftKey = false) => {
@@ -635,7 +635,7 @@ export default function Home() {
       <AnimatedBackground />
       
       {/* Header */}
-      <header className="app-header relative z-20 flex-shrink-0 glass border-b border-white/10 px-6 py-4">
+      <header className="app-header relative z-40 flex-shrink-0 glass border-b border-white/10 px-6 py-4">
         <div className="header-inner max-w-7xl mx-auto">
           {isLoading && !displayData && (
             <div className="mb-4">
@@ -720,6 +720,9 @@ export default function Home() {
                 onMaxNodesChange={setMaxNodes}
                 onGoDeeper={handleGoDeeper}
                 canGoDeeper={Boolean(submittedRequest && submittedRequest.depth < 3)}
+                nextDepth={Math.min(3, Math.max(depth, (submittedRequest?.depth ?? depth) + 1))}
+                isAtMaxDepth={submittedRequest?.depth === 3}
+                isLoading={isLoading}
                 disabled={isLoading}
               />
               </div>
@@ -825,6 +828,7 @@ export default function Home() {
                 data={displayData}
                 colorMode={colorMode}
                 onNodeClick={handleNodeClick}
+                onStageClick={handleCloseSelection}
                 focusedNode={focusedNode}
                 isStreaming={isLoading}
                 focusedCommunityId={focusedCommunityId}

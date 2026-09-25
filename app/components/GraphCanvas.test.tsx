@@ -7,11 +7,12 @@ import type { CrawlResult } from '@/types/graph';
 import { GraphCanvas } from './GraphCanvas';
 
 const cameraReset = vi.hoisted(() => vi.fn());
+const sigmaHandlers = vi.hoisted(() => new Map<string, (...args: unknown[]) => void>());
 
 vi.mock('sigma', () => ({
   Sigma: class MockSigma {
     constructor() {}
-    on() {}
+    on(event: string, handler: (...args: unknown[]) => void) { sigmaHandlers.set(event, handler); }
     getCamera() {
       return {
         on() {},
@@ -67,6 +68,7 @@ describe('GraphCanvas DOM ownership', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    sigmaHandlers.clear();
   });
 
   it('keeps React overlays outside the Sigma container', () => {
@@ -81,6 +83,27 @@ describe('GraphCanvas DOM ownership', () => {
     expect(sigmaContainer).toBeEmptyDOMElement();
     expect(sigmaContainer).not.toContainElement(screen.getByRole('button', { name: 'Zoom in' }));
     expect(sigmaContainer).not.toContainElement(screen.getByText('Exploration map'));
+  });
+
+  it('clears the current selection when the graph background is clicked', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
+    const onStageClick = vi.fn();
+    render(
+      <GraphCanvas
+        data={makeData()}
+        colorMode="community"
+        onNodeClick={vi.fn()}
+        onStageClick={onStageClick}
+        focusedNode={null}
+        path={null}
+      />,
+    );
+
+    await waitFor(() => expect(sigmaHandlers.has('clickStage')).toBe(true));
+    sigmaHandlers.get('clickStage')?.();
+
+    expect(onStageClick).toHaveBeenCalledOnce();
   });
 
   it('defers the initial camera fit until real nodes arrive after the seed preview', async () => {

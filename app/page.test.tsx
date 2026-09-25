@@ -60,17 +60,22 @@ describe('Home live crawl streaming', () => {
   const frameCallbacks = new Map<number, FrameRequestCallback>();
   let nextFrameId = 0;
   let crawlChannels: SseChannel[];
+  let crawlRequestBodies: Record<string, unknown>[];
 
   beforeEach(() => {
     frameCallbacks.clear();
     nextFrameId = 0;
     crawlChannels = [];
+    crawlRequestBodies = [];
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/wikipedia/search')) {
         return Promise.resolve(Response.json([]));
       }
       if (url.includes('/api/crawl')) {
+        if (typeof init?.body === 'string') {
+          crawlRequestBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
         const channel = createSseChannel();
         crawlChannels.push(channel);
         return Promise.resolve(channel.response);
@@ -419,11 +424,21 @@ it('resets expanded-node state when starting Go deeper', async () => {
   expect(goDeeperButton).toBeInTheDocument();
   expect(goDeeperButton).toBeEnabled();
 
+  fireEvent.change(screen.getByLabelText('Crawl depth'), { target: { value: '3' } });
+  fireEvent.change(screen.getByLabelText('Maximum crawled nodes'), { target: { value: '200' } });
+  expect(screen.getByRole('button', { name: /Go deeper · 3 hops/ })).toBeEnabled();
+
   // Start the new crawl.
   fireEvent.click(goDeeperButton);
 
   await waitFor(() => {
     expect(crawlChannels).toHaveLength(3);
+  });
+  expect(screen.getByRole('button', { name: 'Mapping…' })).toBeDisabled();
+  expect(crawlRequestBodies[2]).toMatchObject({
+    seedTitle: 'Alpha',
+    depth: 3,
+    maxNodes: 200,
   });
 
   // Expansion state must have been reset immediately.

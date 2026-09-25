@@ -7,6 +7,9 @@ interface CrawlControlsProps {
   onMaxNodesChange: (maxNodes: number) => void;
   onGoDeeper?: () => void;
   canGoDeeper?: boolean;
+  nextDepth?: number;
+  isAtMaxDepth?: boolean;
+  isLoading?: boolean;
   disabled?: boolean;
 }
 
@@ -17,6 +20,9 @@ export function CrawlControls({
   onMaxNodesChange,
   onGoDeeper,
   canGoDeeper = false,
+  nextDepth = Math.min(3, depth + 1),
+  isAtMaxDepth = false,
+  isLoading = false,
   disabled = false,
 }: CrawlControlsProps) {
   return (
@@ -80,9 +86,19 @@ export function CrawlControls({
           type="button"
           onClick={onGoDeeper}
           disabled={disabled || !canGoDeeper}
+          aria-live="polite"
+          title={`Rebuild map at ${nextDepth} hops with up to ${maxNodes} pages`}
           className="crawl-deeper-button h-10 whitespace-nowrap rounded-lg border border-cyan-400/40 px-3 text-sm font-medium text-cyan-200 transition hover:bg-cyan-400/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Go deeper
+          {isLoading ? (
+            <><span className="crawl-control-spinner" aria-hidden="true" /> Mapping…</>
+          ) : isAtMaxDepth ? (
+            'Maximum depth reached'
+          ) : canGoDeeper ? (
+            <>Go deeper · {nextDepth} hops <span aria-hidden="true">→</span></>
+          ) : (
+            'Go deeper'
+          )}
         </button>
       )}
     </div>

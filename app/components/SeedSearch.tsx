@@ -21,6 +21,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   const debounceRef = useRef<NodeJS.Timeout>();
   const requestControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
+  const selectionCommittedRef = useRef(false);
   const cacheRef = useRef<Map<string, SearchResult[]>>(new Map());
   const listboxId = useId();
 
@@ -44,7 +45,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
     const cached = cacheRef.current.get(cacheKey);
     if (cached) {
       setSuggestions(cached);
-      setShowSuggestions(true);
+      if (!selectionCommittedRef.current) setShowSuggestions(true);
       setIsSearching(false);
       return;
     }
@@ -57,7 +58,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
       setSuggestions(cachedPrefix.filter(({ title }) =>
         title.toLowerCase().includes(trimmed.toLowerCase())
       ));
-      setShowSuggestions(true);
+      if (!selectionCommittedRef.current) setShowSuggestions(true);
     }
 
     if (debounceRef.current) {
@@ -113,6 +114,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   }, [query]);
 
   const handleSelect = (title: string) => {
+    selectionCommittedRef.current = true;
     setQuery(title);
     setShowSuggestions(false);
     setHighlightedIndex(-1);
@@ -189,12 +191,17 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
             aria-activedescendant={highlightedIndex >= 0 ? getOptionId(highlightedIndex) : undefined}
             value={query}
             onChange={(e) => {
+              selectionCommittedRef.current = false;
               setQuery(e.target.value);
               setShowSuggestions(true);
               setHighlightedIndex(-1);
             }}
             onFocus={() => setShowSuggestions(true)}
-            onBlur={() => setShowSuggestions(false)}
+            onBlur={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (nextTarget instanceof HTMLElement && event.currentTarget.parentElement?.contains(nextTarget)) return;
+              setShowSuggestions(false);
+            }}
             onKeyDown={handleKeyDown}
             placeholder="Search a Wikipedia article"
             className="seed-search-input w-full pl-12 pr-10 py-3.5 bg-slate-800/50 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 focus:bg-slate-800/80 transition-all"

@@ -28,6 +28,8 @@ const GraphCanvas = dynamic(
 
 type ColorMode = 'community' | 'depth';
 
+const exampleTopics = ['Alan Turing', 'Climate change', 'Jazz', 'Quantum mechanics'];
+
 class CrawlNotFoundError extends Error {
   constructor(public readonly title: string, public readonly suggestions: string[]) {
     super('not_found');
@@ -869,11 +871,11 @@ export default function Home() {
           )}
 
           {crawlWarning !== null && displayData && (
-            <div className="absolute inset-x-0 top-6 z-30 flex justify-center px-4">
-              <div className="flex max-w-xl items-center gap-4 rounded-2xl border border-amber-500/30 bg-slate-950/90 px-4 py-3 text-sm text-amber-200 shadow-xl backdrop-blur-md">
-                <span>Some pages could not be fetched ({crawlWarning}). Results may be incomplete.</span>
+            <div className="absolute inset-x-0 top-16 z-30 flex justify-center px-4">
+              <div className="crawl-warning flex max-w-xl items-center gap-4 px-4 py-3 text-sm" role="status" aria-live="polite">
+                <span>Map ready to explore. {crawlWarning} {crawlWarning === 1 ? 'page was' : 'pages were'} unavailable, so some links may be missing.</span>
                 <button type="button" onClick={() => refetch()} className="shrink-0 text-xs font-semibold uppercase tracking-wide text-cyan-300 hover:text-white">
-                  Retry
+                  Retry crawl
                 </button>
                 <button type="button" aria-label="Dismiss warning" onClick={() => setCrawlWarning(null)} className="shrink-0 text-lg leading-none text-slate-400 hover:text-white">
                   ×
@@ -883,52 +885,22 @@ export default function Home() {
           )}
 
           {!displayData && !isLoading && !error && !notFound && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="atlas-empty-state text-center max-w-xl">
-                {/* Animated icon */}
-                <div className="relative mx-auto mb-7 w-24 h-24">
-                  <div className="relative w-full h-full bg-slate-900/70 rounded-full border border-cyan-400/30 flex items-center justify-center">
-                    <svg className="w-16 h-16 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                    </svg>
-                  </div>
+            <div className="absolute inset-0 flex items-center justify-center overflow-y-auto px-5 py-8">
+              <section className="atlas-empty-state" aria-labelledby="welcome-title">
+                <div className="landing-index-line">
+                  <span>FIELD NOTE 001</span>
+                  <span>WIKIPEDIA, MAPPED</span>
                 </div>
-                
-                <h2 className="text-3xl font-semibold mb-3">
-                  <span className="gradient-text">Start Your Journey</span>
-                </h2>
-                <p className="text-slate-400 text-base mb-7">
-                  Enter any Wikipedia article above and watch as connections between topics come alive through interactive visualization
-                </p>
-                
-                {/* Feature highlights */}
-                <div className="flex flex-wrap justify-center gap-x-6 gap-y-3">
-                  <div className="flex items-center gap-2 text-sm text-slate-300">
-                    <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
-                      </svg>
-                    </div>
-                    <p>Explore Links</p>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-slate-300">
-                    <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
-                    </div>
-                    <p>Find Communities</p>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-slate-300">
-                    <div className="w-6 h-6 rounded-full bg-pink-500/20 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                      </svg>
-                    </div>
-                    <p>Shortest Paths</p>
-                  </div>
+                <h2 id="welcome-title">Follow an idea beyond its first link.</h2>
+                <p>Choose a Wikipedia article to see the pages, patterns, and unexpected connections around it.</p>
+                <div className="landing-examples" role="group" aria-label="Example topics">
+                  <span className="landing-examples-label">Start with</span>
+                  {exampleTopics.map((topic) => (
+                    <button key={topic} type="button" onClick={() => handleSearch(topic)}>{topic}</button>
+                  ))}
                 </div>
-              </div>
+                <div className="landing-footnote"><span aria-hidden="true">↗</span> Search above to map any article</div>
+              </section>
             </div>
           )}
         </div>

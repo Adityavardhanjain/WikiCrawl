@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
 import type { CrawlResult, WikiNode } from '@/types/graph';
 import { MemoizedNodeDetailPanel } from './NodeDetailPanel';
 import * as summaryModule from '@/lib/summary';
@@ -94,5 +94,18 @@ describe('NodeDetailPanel summary', () => {
 
     await waitFor(() => expect(screen.getByTestId('node-summary-error')).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.queryByTestId('node-summary-skeleton')).not.toBeInTheDocument();
+  });
+
+  it('makes Explore deeper the primary node action', () => {
+    const node = makeNode();
+    const onExpand = vi.fn();
+
+    render(
+      <MemoizedNodeDetailPanel node={node} data={makeData(node)} onClose={vi.fn()} onExpand={onExpand} />,
+      { wrapper: createWrapper() },
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Explore deeper/ }));
+    expect(onExpand).toHaveBeenCalledWith(node.id);
   });
 });

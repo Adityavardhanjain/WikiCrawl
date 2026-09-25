@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import type { WikiNode, CrawlResult, PathResult } from '@/types/graph';
 import { buildAdjacency } from '@/lib/adjacency';
 import { useNodeSummary } from './useNodeSummary';
@@ -39,7 +40,7 @@ function NodeDetailPanel({
     return (buildAdjacency(data.edges).get(node.id) ?? [])
       .map((connectedId) => nodesById.get(connectedId))
       .filter((connectedNode): connectedNode is WikiNode => Boolean(connectedNode));
-  }, [data?.edges, data?.nodes, node?.id]);
+  }, [data, node]);
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useNodeSummary(node?.id ?? null);
 
@@ -50,7 +51,7 @@ function NodeDetailPanel({
       .filter((candidate) => candidate.id !== node.id)
       .filter((candidate) => !query || candidate.title.toLocaleLowerCase().includes(query))
       .slice(0, 8);
-  }, [data?.nodes, node?.id, pathQuery]);
+  }, [data, node, pathQuery]);
 
   useEffect(() => {
     setPathPickerOpen(false);
@@ -74,12 +75,12 @@ function NodeDetailPanel({
   const community = data.communities.find(c => c.id === node.communityId);
 
   return (
-    <div className="node-detail mobile-sheet reduce-effects absolute right-4 top-4 w-80 glass-strong rounded-2xl shadow-2xl overflow-hidden border border-cyan-500/20 animate-in slide-in-from-right" role="region" aria-label={`${node.title} page details`}>
+    <div className="node-detail mobile-sheet reduce-effects absolute right-4 top-4 w-80 glass-strong shadow-2xl overflow-hidden border border-cyan-500/20 animate-in slide-in-from-right" role="region" aria-label={`${node.title} page details`}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-white/10 bg-gradient-to-r from-cyan-500/10 to-purple-500/10">
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-500 p-[2px] flex-shrink-0">
-            <div className="w-full h-full bg-slate-900 rounded-lg flex items-center justify-center">
+          <div className="node-detail-mark flex-shrink-0">
+            <div className="w-full h-full flex items-center justify-center">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
@@ -107,9 +108,12 @@ function NodeDetailPanel({
         {(summaryLoading || summary?.thumbnail) && (
           <div data-testid="node-summary-thumbnail" className="relative w-full aspect-[16/9] overflow-hidden rounded-xl bg-slate-800/60">
             {summary?.thumbnail ? (
-              <img
+              <Image
                 src={summary.thumbnail.source}
                 alt=""
+                width={summary.thumbnail.width}
+                height={summary.thumbnail.height}
+                unoptimized
                 loading="lazy"
                 className="h-full w-full object-cover"
               />
@@ -284,12 +288,26 @@ function NodeDetailPanel({
         )}
 
         {/* Actions */}
-        <div className="flex gap-2 pt-2">
+        <div className="node-detail-actions pt-2">
+          <button
+            type="button"
+            onClick={() => onExpand(node.id)}
+            disabled={isExpanding || isExpanded}
+            className="node-explore-button"
+          >
+            {isExpanding ? (
+              <><span className="node-action-spinner" aria-hidden="true" /> Finding new connections</>
+            ) : isExpanded ? (
+              <><span aria-hidden="true">✓</span> Explored</>
+            ) : (
+              <>Explore deeper <span aria-hidden="true">↗</span></>
+            )}
+          </button>
           <a
             href={node.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex-1 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded-xl text-center transition-all border border-white/10 hover:border-cyan-500/30"
+            className="node-wikipedia-link"
           >
             <span className="flex items-center justify-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -298,32 +316,6 @@ function NodeDetailPanel({
               Wikipedia
             </span>
           </a>
-          <button
-            onClick={() => onExpand(node.id)}
-            disabled={isExpanding || isExpanded}
-            className="flex-1 btn-primary px-3 py-2.5 text-white text-sm rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {isExpanding ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Diving...</span>
-              </>
-            ) : isExpanded ? (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>Expanded</span>
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                <span>Expand</span>
-              </>
-            )}
-          </button>
         </div>
       </div>
     </div>

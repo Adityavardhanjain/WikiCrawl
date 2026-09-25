@@ -154,6 +154,20 @@ function runPendingFrames() {
     // 4. ...and crawl B's update still applies normally.
     await waitFor(() => expect(screen.getByText('Fresh Page From B')).toBeInTheDocument());
   });
+
+  it('starts a crawl from an example topic in the welcome state', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Home />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Jazz' }));
+    await waitFor(() => expect(crawlChannels).toHaveLength(1));
+
+    expect(screen.getByRole('button', { name: 'Explore article' })).toBeDisabled();
+  });
   it('keeps a partially expanded node retryable and marks it expanded only after completion', async () => {
   window.history.replaceState(
     {},
@@ -210,13 +224,13 @@ function runPendingFrames() {
 
   await waitFor(() => {
     expect(
-      screen.getByRole('button', { name: 'Expand' }),
+      screen.getByRole('button', { name: 'Explore deeper' }),
     ).toBeInTheDocument();
   });
 
   // Start expansion.
   fireEvent.click(
-    screen.getByRole('button', { name: 'Expand' }),
+    screen.getByRole('button', { name: 'Explore deeper' }),
   );
 
   await waitFor(() => {
@@ -246,17 +260,17 @@ function runPendingFrames() {
   // The node must remain retryable.
   await waitFor(() => {
     expect(
-      screen.getByRole('button', { name: 'Expand' }),
+      screen.getByRole('button', { name: 'Explore deeper' }),
     ).toBeInTheDocument();
   });
 
   expect(
-    screen.queryByRole('button', { name: 'Expanded' }),
+    screen.queryByRole('button', { name: 'Explored' }),
   ).not.toBeInTheDocument();
 
   // Retry the expansion.
   fireEvent.click(
-    screen.getByRole('button', { name: 'Expand' }),
+    screen.getByRole('button', { name: 'Explore deeper' }),
   );
 
   await waitFor(() => {
@@ -285,7 +299,7 @@ function runPendingFrames() {
 
   await waitFor(() => {
     expect(
-      screen.getByRole('button', { name: 'Expanded' }),
+      screen.getByRole('button', { name: 'Explored' }),
     ).toBeInTheDocument();
   });
 });
@@ -353,13 +367,13 @@ it('resets expanded-node state when starting Go deeper', async () => {
 
   await waitFor(() => {
     expect(
-      screen.getByRole('button', { name: 'Expand' }),
+      screen.getByRole('button', { name: 'Explore deeper' }),
     ).toBeInTheDocument();
   });
 
   // Expand it successfully.
   fireEvent.click(
-    screen.getByRole('button', { name: 'Expand' }),
+    screen.getByRole('button', { name: 'Explore deeper' }),
   );
 
   await waitFor(() => {
@@ -388,7 +402,7 @@ it('resets expanded-node state when starting Go deeper', async () => {
 
   await waitFor(() => {
     expect(
-      screen.getByRole('button', { name: 'Expanded' }),
+      screen.getByRole('button', { name: 'Explored' }),
     ).toBeInTheDocument();
   });
 
@@ -415,12 +429,12 @@ it('resets expanded-node state when starting Go deeper', async () => {
   // Expansion state must have been reset immediately.
   await waitFor(() => {
     expect(
-      screen.getByRole('button', { name: 'Expand' }),
+      screen.getByRole('button', { name: 'Explore deeper' }),
     ).toBeInTheDocument();
   });
 
   expect(
-    screen.queryByRole('button', { name: 'Expanded' }),
+    screen.queryByRole('button', { name: 'Explored' }),
   ).not.toBeInTheDocument();
 });
 

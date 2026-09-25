@@ -196,7 +196,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setShowSuggestions(false)}
             onKeyDown={handleKeyDown}
-            placeholder="Search Wikipedia..."
+            placeholder="Search a Wikipedia article"
             className="seed-search-input w-full pl-12 pr-10 py-3.5 bg-slate-800/50 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 focus:bg-slate-800/80 transition-all"
             disabled={isLoading}
           />
@@ -295,14 +295,14 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
           {isLoading ? (
             <>
               <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              <span>Diving...</span>
+              <span>Mapping…</span>
             </>
           ) : (
             <>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              <span>Explore</span>
+              <span>Map topic</span>
             </>
           )}
         </button>

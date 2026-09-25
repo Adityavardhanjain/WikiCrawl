@@ -249,6 +249,7 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, focusedCo
         <div className="mt-3 flex justify-center gap-3 text-[11px]">
           <a className="text-slate-400 transition-colors hover:text-cyan-300" href="mailto:jainadityavardhan@gmail.com?subject=WikiCrawl%20Feedback">Feedback</a>
           <a className="text-slate-400 transition-colors hover:text-cyan-300" href="https://www.linkedin.com/in/adityavardhan-jain/" target="_blank" rel="noopener noreferrer" aria-label="Adityavardhan Jain on LinkedIn">LinkedIn</a>
+          <a className="text-slate-400 transition-colors hover:text-cyan-300" href="https://github.com/Adityavardhanjain" target="_blank" rel="noopener noreferrer" aria-label="Adityavardhan Jain on GitHub">GitHub</a>
         </div>
         <p className="mt-2 text-center text-[10px] text-atlas-dim">Created by Adityavardhan Jain</p>
       </div>

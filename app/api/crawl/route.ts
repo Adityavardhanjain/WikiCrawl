@@ -234,7 +234,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(cachedResult);
     }
 
-    const seedPage = await getPageLinks(seedTitle);
+    const seedPage = await getPageLinks(seedTitle, undefined, {
+      signal: request.signal,
+      timeoutMs: 10_000,
+    });
     if (seedPage.missing) {
       const suggestions = await searchWikipedia(seedTitle)
         .then((results) => results.map((result) => result.title))

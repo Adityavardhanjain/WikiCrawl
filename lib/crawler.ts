@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 
 const WIKIPEDIA_BATCH_SIZE = 8;
 const MAX_CRAWL_CONCURRENCY = 3;
+const WIKIPEDIA_REQUEST_TIMEOUT_MS = 10_000;
 const PAGE_LINK_LIMIT: number | undefined = undefined;
 const MAX_REQUEST_BUDGET = 500;
 
@@ -124,12 +125,13 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   let activeWork = 0;
   let requestsUsed = 0;
   const configuredConcurrency = Number(process.env.CRAWL_CONCURRENCY ?? 3);
-  const crawlConcurrency = Math.min(MAX_CRAWL_CONCURRENCY, Math.max(1, Math.trunc(configuredConcurrency) || 4));
+  const crawlConcurrency = Math.min(MAX_CRAWL_CONCURRENCY, Math.max(1, Math.trunc(configuredConcurrency) || 3));
 
   const rankLayer = async (layer: { title: string; depth: number }[]): Promise<typeof layer> => {
     if (layer.length <= 1) return layer;
     const pageViews = await getPageViews(layer.map((item) => item.title), {
       concurrency: crawlConcurrency,
+      signal,
       beforeRequest: () => {
         if (signal?.aborted || requestsUsed >= requestBudget) return false;
         requestsUsed += 1;
@@ -198,6 +200,8 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
               requestsUsed += 1;
               return true;
             },
+            signal,
+            timeoutMs: WIKIPEDIA_REQUEST_TIMEOUT_MS,
           });
         } catch {
           if (signal?.aborted || requestsUsed >= requestBudget) {

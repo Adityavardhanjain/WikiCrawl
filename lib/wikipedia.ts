@@ -69,20 +69,17 @@ async function fetchWikipedia(
     if (options.beforeRequest && !options.beforeRequest()) throw new Error('Wikipedia request budget exhausted');
     if (options.signal?.aborted) throw new Error('Wikipedia request aborted');
     
-    const controller = options.timeoutMs ? new AbortController() : undefined;
-    const timeout = options.timeoutMs ? setTimeout(() => controller?.abort(), options.timeoutMs) : undefined;
-    let response: Response;
-    try {
-      response = await fetch(url.toString(), {
-        headers: {
-          'User-Agent': USER_AGENT,
-          Accept: 'application/json',
-        },
-        signal: controller?.signal ?? options.signal,
-      });
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
+    const timeoutSignal = options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined;
+    const signal = options.signal && timeoutSignal
+      ? AbortSignal.any([options.signal, timeoutSignal])
+      : timeoutSignal ?? options.signal;
+    const response = await fetch(url.toString(), {
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json',
+      },
+      signal,
+    });
 
     if (response.status === 429) {
       if (attempt >= maxRetries) {
@@ -165,6 +162,7 @@ export interface PageLinksBatchOptions {
   beforeRequest?: () => boolean;
   paginationSessionId?: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 export async function getPageLinksBatch(
@@ -211,6 +209,8 @@ export async function getPageLinksBatch(
   params,
   {
     beforeRequest: options.beforeRequest,
+    signal: options.signal,
+    timeoutMs: options.timeoutMs,
   }
 );
   
@@ -323,8 +323,12 @@ for (let index = 0; index < fetchedPages.length; index += 1) {
   };
 }
 
-export async function getPageLinks(title: string, continueToken?: string): Promise<PageLinksResult> {
-  const result = await getPageLinksBatch([title], continueToken);
+export async function getPageLinks(
+  title: string,
+  continueToken?: string,
+  options: PageLinksBatchOptions = {},
+): Promise<PageLinksResult> {
+  const result = await getPageLinksBatch([title], continueToken, options);
   return result.pages[0] || { title, resolvedTitle: title, links: [] };
 }
 
@@ -358,7 +362,12 @@ export async function getPageViews(
         prop: 'pageviews',
         pvipdays: '30',
         redirects: '1',
-      }, { beforeRequest: options.beforeRequest, maxRetries: 0, timeoutMs: PAGEVIEW_TIMEOUT_MS });
+      }, {
+        beforeRequest: options.beforeRequest,
+        maxRetries: 0,
+        timeoutMs: PAGEVIEW_TIMEOUT_MS,
+        signal: options.signal,
+      });
       const pages = data.query?.pages ?? [];
       const redirects = data.query?.redirects ?? [];
       const redirectMap = new Map(redirects.map((redirect) => [redirect.from || redirect.title || '', redirect.to]));

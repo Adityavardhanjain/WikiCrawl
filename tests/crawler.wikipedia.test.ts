@@ -228,6 +228,52 @@ it('consumes request budget once per actual HTTP retry attempt', async () => {
   }
 });
 
+  it('aborts an in-flight link request when its caller is cancelled', async () => {
+    const originalFetch = globalThis.fetch;
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    globalThis.fetch = ((_, init) => {
+      requestSignal = init?.signal as AbortSignal | undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener('abort', () => reject(requestSignal?.reason), { once: true });
+      });
+    }) as typeof fetch;
+
+    try {
+      const request = getPageLinksBatch(['Abort signal page'], undefined, {
+        signal: controller.signal,
+        timeoutMs: 10_000,
+      });
+      const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+
+      controller.abort();
+      await rejection;
+
+      expect(requestSignal?.aborted).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('times out a stalled link request', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+    })) as typeof fetch;
+
+    try {
+      const request = getPageLinksBatch(['Timeout page'], undefined, { timeoutMs: 20 });
+      await expect(request).rejects.toMatchObject({ name: 'TimeoutError' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('does not paginate satisfied pages in a mixed batch', async () => {
     const mock = installMockMediaWiki();
 

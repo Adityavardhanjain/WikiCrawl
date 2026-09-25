@@ -1,8 +1,3 @@
-types/     Shared graph types
-tests/     API, crawler, and performance tests
-docs/      Wikipedia API notes
-scripts/   Wikipedia API probe
-```
 # WikiCrawl
 
 WikiCrawl turns links around a Wikipedia article into an interactive graph. Search for a topic, watch the crawl arrive, and inspect the pages and connections in the resulting map.
@@ -10,6 +5,8 @@ WikiCrawl turns links around a Wikipedia article into an interactive graph. Sear
 [Open the live app](https://wiki-crawl.vercel.app) · [Report an issue](https://github.com/Adityavardhanjain/WikiCrawl/issues) · [Source](https://github.com/Adityavardhanjain/WikiCrawl)
 
 ![CI](https://img.shields.io/github/actions/workflow/status/Adityavardhanjain/WikiCrawl/ci.yml?branch=main&label=CI) ![License](https://img.shields.io/github/license/Adityavardhanjain/WikiCrawl)
+
+![WikiCrawl showing a completed Wikipedia link graph with community colors, crawl controls, and the page atlas](docs/wikicrawl-preview.png)
 
 ## What it does
 
@@ -54,12 +51,18 @@ Node expansion is a separate operation from increasing root crawl depth. The exp
 | Maximum pages requested | 50–500 |
 | Crawler traversal request budget | At most 500 upstream requests |
 | Crawler concurrency | At most 3 |
+| Wikipedia link request timeout | 10 seconds |
+| Browser summary request timeout | 8 seconds |
 | Expansion payload | At most 500 known nodes and 50,000 edges |
+| Search API rate limit | 120 requests per client address in 10 minutes |
+| Concurrent upstream searches | At most 100 per server process |
 | Crawl API throttle | 60 requests per client address in a rolling 10-minute window |
 
 The crawler request budget applies after the crawl route's separate seed-page validation request. A crawl may return a partial graph if Wikipedia is unavailable, rate-limits requests, or the request budget is exhausted. The UI reports unavailable pages where known.
 
 The crawl throttle is an in-process sliding-window limit. It uses `x-real-ip`, then the last address in `x-forwarded-for`; reverse proxies must overwrite or append these headers correctly. Each server process or serverless instance maintains its own counters, so this is a basic abuse-control measure, not a distributed quota. For multi-instance enforcement, use a shared rate-limit store at the edge or in a service such as Redis.
+
+Search uses the same client-address precedence and per-process limitation. Identical in-flight queries share one upstream request; the route returns `503` with `Retry-After` when its 100-search concurrency cap is full.
 
 Unexpected rendering errors show a retry screen at the route level. Errors in the root layout have a separate global fallback. Expected crawl and network errors continue to use the app's normal inline error states.
 

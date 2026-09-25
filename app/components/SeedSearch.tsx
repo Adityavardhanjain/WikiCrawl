@@ -17,6 +17,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchUnavailable, setSearchUnavailable] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<NodeJS.Timeout>();
   const requestControllerRef = useRef<AbortController | null>(null);
@@ -27,12 +28,14 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
 
   const trimmedQuery = query.trim();
   // Only treat the search as "empty" once a real response confirms it, never while still loading.
-  const showEmptyState = !isSearching && trimmedQuery.length > 0 && suggestions.length === 0;
+  const showBusyState = !isSearching && trimmedQuery.length > 0 && searchUnavailable;
+  const showEmptyState = !isSearching && trimmedQuery.length > 0 && suggestions.length === 0 && !searchUnavailable;
   const optionCount = showEmptyState ? 1 : suggestions.length;
-  const listVisible = showSuggestions && (suggestions.length > 0 || showEmptyState);
+  const listVisible = showSuggestions && (suggestions.length > 0 || showEmptyState || showBusyState);
 
   useEffect(() => {
     const trimmed = query.trim();
+    setSearchUnavailable(false);
 
     if (trimmed.length < 1) {
       requestControllerRef.current?.abort();
@@ -79,9 +82,10 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
         );
 
         if (!response.ok) {
-          if (response.status === 429) {
+          if (response.status === 429 || response.status === 503) {
             if (requestId === requestIdRef.current) {
               setIsSearching(false);
+              setSearchUnavailable(true);
             }
             return;
           }
@@ -122,6 +126,8 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   };
 
   const resolveSubmission = () => {
+    if (showBusyState) return;
+
     if (highlightedIndex >= 0) {
       if (showEmptyState) {
         handleSelect(trimmedQuery);
@@ -145,7 +151,7 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
   const getOptionId = (index: number) => `${listboxId}-option-${index}`;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!listVisible) return;
+    if (!listVisible || showBusyState) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -243,7 +249,11 @@ export function SeedSearch({ onSearch, isLoading }: SeedSearchProps) {
               role="listbox"
               className="seed-search-list absolute z-50 w-full mt-2 glass-strong rounded-xl shadow-2xl overflow-hidden border border-white/10"
             >
-              {showEmptyState ? (
+              {showBusyState ? (
+                <li role="presentation" className="px-4 py-3 text-sm text-slate-400">
+                  <span role="status">Search is busy. Please try again shortly.</span>
+                </li>
+              ) : showEmptyState ? (
                 <li>
                   <button
                     type="button"

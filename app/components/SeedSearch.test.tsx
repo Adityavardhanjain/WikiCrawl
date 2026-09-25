@@ -106,4 +106,22 @@ describe('SeedSearch', () => {
 
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
+
+  it('shows a busy message instead of a no-results action when search is throttled', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 503 })));
+    const onSearch = vi.fn();
+    render(<SeedSearch onSearch={onSearch} isLoading={false} />);
+
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, { target: { value: 'Quantum' } });
+    await waitForDebounce();
+
+    expect(await screen.findByText('Search is busy. Please try again shortly.')).toBeInTheDocument();
+    expect(screen.getByText('Search is busy. Please try again shortly.')).toHaveTextContent(
+      'Search is busy. Please try again shortly.',
+    );
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onSearch).not.toHaveBeenCalled();
+  });
 });

@@ -5,6 +5,7 @@ import { getCachedResult, setCachedResult, generateCacheKey } from '@/lib/db';
 import { getPageLinks, searchWikipedia } from '@/lib/wikipedia';
 import { nanoid } from 'nanoid';
 import type { CrawlProgress, CrawlResult, CrawlRequest, WikiNode, WikiEdge } from '@/types/graph';
+import { createSlidingWindowRateLimiter } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,12 @@ const MAX_DEPTH = 3;
 const MIN_MAX_NODES = 50;
 const MAX_MAX_NODES = 500;
 const MAX_SEED_TITLE_LENGTH = 512;
+const CRAWL_RATE_LIMIT = 60;
+const CRAWL_RATE_WINDOW_MS = 10 * 60 * 1000;
+const consumeCrawlRateLimit = createSlidingWindowRateLimiter({
+  limit: CRAWL_RATE_LIMIT,
+  windowMs: CRAWL_RATE_WINDOW_MS,
+});
 const encoder = new TextEncoder();
 
 function sendStreamEvent(controller: ReadableStreamDefaultController, event: string, payload: unknown) {
@@ -196,6 +203,29 @@ export async function POST(request: NextRequest) {
     const validatedDepth = Math.min(Math.max(depth ?? 2, MIN_DEPTH), MAX_DEPTH);
     const validatedMaxNodes = Math.min(Math.max(maxNodes ?? 150, MIN_MAX_NODES), MAX_MAX_NODES);
 
+    const clientAddress = request.headers.get('x-real-ip')?.trim()
+      || request.headers.get('x-forwarded-for')?.split(',').at(-1)?.trim()
+      || 'unknown';
+    const rateLimit = consumeCrawlRateLimit(clientAddress);
+    const rateLimitHeaders = {
+      'RateLimit-Limit': String(rateLimit.limit),
+      'RateLimit-Remaining': String(rateLimit.remaining),
+      'RateLimit-Reset': String(Math.ceil(rateLimit.resetAt / 1000)),
+    };
+
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many crawl requests. Please wait before trying again.' },
+        {
+          status: 429,
+          headers: {
+            ...rateLimitHeaders,
+            'Retry-After': String(rateLimit.retryAfterSeconds),
+          },
+        },
+      );
+    }
+
     // Check crawl cache first before making Wikipedia API calls
     const cacheKey = generateCacheKey(seedTitle, validatedDepth, validatedMaxNodes);
     const cachedResult = isExpand ? null : getCachedResult(cacheKey);
@@ -321,6 +351,7 @@ export async function POST(request: NextRequest) {
 
     return new Response(stream, {
       headers: {
+        ...rateLimitHeaders,
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',

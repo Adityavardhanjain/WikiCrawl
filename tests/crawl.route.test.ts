@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { installMockMediaWiki } from './helpers/mockMediaWiki';
+import type { CrawlResult } from '../types/graph';
 
 vi.mock('../lib/db', () => ({
   getCachedPageLinks: vi.fn(() => null),
@@ -12,12 +13,14 @@ vi.mock('../lib/db', () => ({
 }));
 
 import { POST } from '../app/api/crawl/route';
+import * as database from '../lib/db';
 
-async function postCrawl(body: Record<string, unknown>): Promise<Response> {
+async function postCrawl(body: Record<string, unknown>, clientIp?: string): Promise<Response> {
   const request = new Request('http://localhost/api/crawl', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(clientIp ? { 'x-real-ip': clientIp } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -194,6 +197,41 @@ it('still accepts a valid expansion request', async () => {
     expect(body).toContain('"result"');
   } finally {
     mock.restore();
+  }
+});
+
+it('rate limits repeated crawl requests and includes retry headers', async () => {
+  vi.mocked(database.getCachedResult).mockReturnValue({
+    id: 'cached-result',
+    seedId: 'Page 0',
+    nodes: [],
+    edges: [],
+    communities: [],
+    crawledAt: new Date(0).toISOString(),
+    positions: {},
+  } as CrawlResult);
+
+  try {
+    for (let requestNumber = 0; requestNumber < 60; requestNumber += 1) {
+      const response = await postCrawl(
+        { seedTitle: 'Page 0', depth: 1, maxNodes: 50 },
+        '192.0.2.90',
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const response = await postCrawl(
+      { seedTitle: 'Page 0', depth: 1, maxNodes: 50 },
+      '192.0.2.90',
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toMatch(/^\d+$/);
+    expect(response.headers.get('ratelimit-limit')).toBe('60');
+    expect(body.error).toMatch(/Too many crawl requests/);
+  } finally {
+    vi.mocked(database.getCachedResult).mockReturnValue(null);
   }
 });
 

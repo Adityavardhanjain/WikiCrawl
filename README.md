@@ -2,7 +2,7 @@ types/     Shared graph types
 tests/     API, crawler, and performance tests
 docs/      Wikipedia API notes
 scripts/   Wikipedia API probe
-`
+```
 # WikiCrawl
 
 WikiCrawl turns links around a Wikipedia article into an interactive graph. Search for a topic, watch the crawl arrive, and inspect the pages and connections in the resulting map.

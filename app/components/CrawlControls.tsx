@@ -27,7 +27,7 @@ export function CrawlControls({
 }: CrawlControlsProps) {
   return (
     <div className="crawl-control-grid flex items-end gap-6">
-      <div className="crawl-control flex-1">
+      <div className="crawl-control crawl-control-panel flex-1">
         <div className="flex justify-between items-center mb-2">
           <label htmlFor="crawl-depth" className="text-sm font-medium text-atlas-muted">
             Crawl Depth
@@ -54,7 +54,7 @@ export function CrawlControls({
         </div>
       </div>
 
-      <div className="crawl-control flex-1">
+      <div className="crawl-control crawl-control-panel flex-1">
         <div className="flex justify-between items-center mb-2">
           <label htmlFor="max-nodes" className="text-sm font-medium text-atlas-muted">
             Max Nodes

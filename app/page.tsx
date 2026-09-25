@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import type { Community, CrawlResult, WikiEdge, WikiNode, PathResult } from '@/types/graph';
 import { createCrawlRequest, getCrawlPayload, parseCrawlParams, buildExpandRequestBody, type CrawlRequest } from '@/lib/crawlRequest';
@@ -210,6 +211,7 @@ export default function Home() {
   const [colorMode, setColorMode] = useState<ColorMode>('community');
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
   const [reduceEffects, setReduceEffects] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
@@ -496,6 +498,42 @@ export default function Home() {
     setExpandNotice(null);
   }, [data, depth, liveData, maxNodes]);
 
+  const handleReturnHome = useCallback(() => {
+    submittedRequestRef.current = null;
+    requestNonceRef.current += 1;
+    liveUpdateRef.current = null;
+    if (liveUpdateFrameRef.current !== null) {
+      window.cancelAnimationFrame(liveUpdateFrameRef.current);
+      liveUpdateFrameRef.current = null;
+    }
+    void queryClient.cancelQueries({ queryKey: ['crawl'] });
+    queryClient.removeQueries({ queryKey: ['crawl'] });
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('seed');
+    url.searchParams.delete('depth');
+    url.searchParams.delete('nodes');
+    window.history.replaceState({}, '', url.toString());
+
+    previousDataRef.current = null;
+    setSubmittedRequest(null);
+    setLiveData(null);
+    setSeedPreview(false);
+    setCrawlStage('crawling');
+    setSelectedNodeId(null);
+    setFocusedNode(null);
+    setFocusedCommunityId(null);
+    setPathSelection(null);
+    setExpandedNodeIds(new Set());
+    setExpandingNodeId(null);
+    setExpandNotice(null);
+    setGraphError(null);
+    setCrawlWarning(null);
+    setNotFound(null);
+    setSidebarVisible(true);
+    setSidebarOpen(false);
+  }, [queryClient]);
+
   const handleGoDeeper = useCallback(() => {
     if (!submittedRequest || submittedRequest.depth >= 3) return;
     const nextDepth = Math.min(3, Math.max(submittedRequest.depth + 1, depth));
@@ -636,7 +674,8 @@ export default function Home() {
           <div className="header-topline flex items-center justify-between mb-4">
             <div className="app-brand flex items-center gap-4">
               {/* Animated logo */}
-              <div className="relative">
+              <Link href="/" className="app-home-link" aria-label="Return to WikiCrawl home" onNavigate={handleReturnHome}>
+                <span className="relative">
                 <div className="app-brand-mark w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 via-purple-500 to-pink-500 p-[2px]">
                   <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
                     <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -644,7 +683,8 @@ export default function Home() {
                     </svg>
                   </div>
                 </div>
-              </div>
+                </span>
+              </Link>
               <div>
                 <h1 className="text-2xl font-bold">
                   <span className="gradient-text">WikiCrawl</span>
@@ -898,10 +938,22 @@ export default function Home() {
         {/* Sidebar */}
         {displayData && (
           <>
-            <button type="button" className="mobile-sidebar-toggle atlas-mobile-button" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen((open) => !open)}>
+            <button type="button" className="mobile-sidebar-toggle atlas-mobile-button" aria-expanded={sidebarVisible && sidebarOpen} onClick={() => {
+              if (!sidebarVisible) {
+                setSidebarVisible(true);
+                setSidebarOpen(true);
+              } else {
+                setSidebarOpen((open) => !open);
+              }
+            }}>
               {sidebarOpen ? 'Close atlas' : 'Open atlas'}
             </button>
-            <MemoizedSidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} focusedCommunityId={focusedCommunityId} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+            {!sidebarVisible && (
+              <button type="button" className="desktop-sidebar-toggle" onClick={() => setSidebarVisible(true)}>
+                Open Atlas <span aria-hidden="true">←</span>
+              </button>
+            )}
+            {sidebarVisible && <MemoizedSidebar data={displayData} onNodeSelect={handleNodeSelect} onCommunitySelect={handleCommunitySelect} focusedNode={focusedNode} focusedCommunityId={focusedCommunityId} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} onDesktopClose={() => setSidebarVisible(false)} />}
           </>
         )}
       </div>

@@ -13,9 +13,10 @@ interface SidebarProps {
   focusedCommunityId?: number | null;
   isOpen?: boolean;
   onClose?: () => void;
+  onDesktopClose?: () => void;
 }
 
-function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, focusedCommunityId = null, isOpen = false, onClose = () => undefined }: SidebarProps) {
+function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, focusedCommunityId = null, isOpen = false, onClose = () => undefined, onDesktopClose = onClose }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<'pagerank' | 'bridges' | 'communities'>('pagerank');
   const [filterQuery, setFilterQuery] = useState('');
   const selectedNode = data.nodes.find((node) => node.id === focusedNode) ?? null;
@@ -67,7 +68,10 @@ function Sidebar({ data, onNodeSelect, onCommunitySelect, focusedNode, focusedCo
             <p className="text-xs text-atlas-muted">Atlas of Wikipedia knowledge</p>
           </div>
           </div>
-          <button type="button" onClick={onClose} className="mobile-sheet-close atlas-icon-button" aria-label="Close atlas sidebar">×</button>
+          <button type="button" onClick={() => {
+            if (window.matchMedia('(min-width: 701px)').matches) onDesktopClose();
+            else onClose();
+          }} className="atlas-sidebar-close atlas-icon-button" aria-label="Close atlas sidebar" title="Close Atlas">×</button>
         </div>
         {selectedNode ? (
           <div className="atlas-context">

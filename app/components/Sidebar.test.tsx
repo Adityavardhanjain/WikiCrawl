@@ -66,4 +66,15 @@ describe('Sidebar rankings and filters', () => {
     fireEvent.click(row);
     expect(selectCommunity).toHaveBeenCalledWith(1);
   });
+
+  it('closes the desktop Atlas panel through its accessible close control', () => {
+    const close = vi.fn();
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(min-width: 701px)' }));
+    const data = makeData([makeNode('Seed', 1, 0)]);
+    render(<MemoizedSidebar data={data} onNodeSelect={vi.fn()} onCommunitySelect={vi.fn()} focusedNode={null} onDesktopClose={close} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close atlas sidebar' }));
+    expect(close).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
 });

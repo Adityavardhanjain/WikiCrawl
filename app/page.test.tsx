@@ -175,6 +175,17 @@ function runPendingFrames() {
     expect(screen.getByRole('button', { name: 'Explore article' })).toBeDisabled();
   });
 
+  it('exposes the WikiCrawl mark as a home link', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Home />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole('link', { name: 'Return to WikiCrawl home' })).toHaveAttribute('href', '/');
+  });
+
   it('shows live page counts and indeterminate activity instead of a stalled percentage', async () => {
     window.history.replaceState({}, '', '/?seed=Alpha&depth=1&nodes=50');
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

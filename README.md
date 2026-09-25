@@ -35,7 +35,7 @@ flowchart LR
 	E --> U
 	U --> G[Sigma graph renderer]
 	G --> F[ForceAtlas2 worker]
-```
+`
 
 The crawler requests article links in batches and follows MediaWiki continuation tokens. It normalizes underscores and spaces, resolves redirects, avoids duplicate nodes, filters noisy titles, and bounds concurrency and upstream requests. Pageviews are used to prioritize candidates when available; a seed-based deterministic ordering is used when they are not.
 

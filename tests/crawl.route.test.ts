@@ -203,6 +203,37 @@ it('still accepts a valid expansion request', async () => {
   }
 });
 
+it('returns budget-truncated crawl results without caching them as complete', async () => {
+  const originalFetch = globalThis.fetch;
+  let linkRequests = 0;
+  globalThis.fetch = (async (input) => {
+    const url = new URL(input.toString());
+    if (url.searchParams.get('prop') === 'links') {
+      linkRequests += 1;
+      const title = url.searchParams.get('titles')?.split('|')[0] ?? 'Page 0';
+      return Response.json({
+        query: {
+          pages: [{ pageid: 1, title, links: [{ title: 'Page 1' }] }],
+        },
+        continue: { plcontinue: '1|0|500' },
+      });
+    }
+    return Response.json({ query: { pages: [] } });
+  }) as typeof fetch;
+
+  try {
+    const response = await postCrawl({ seedTitle: 'Page 0', depth: 1, maxNodes: 50 }, '192.0.2.91');
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(linkRequests).toBeGreaterThanOrEqual(200);
+    expect(body).toContain('"partial":true');
+    expect(database.setCachedResult).not.toHaveBeenCalled();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 it('rate limits repeated crawl requests and includes retry headers', async () => {
   vi.mocked(database.getCachedResult).mockReturnValue({
     id: 'cached-result',

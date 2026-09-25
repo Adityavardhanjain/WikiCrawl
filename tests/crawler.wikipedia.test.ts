@@ -146,6 +146,32 @@ describe('offline crawler', () => {
   }
 });
 
+it('keeps accumulated links isolated between pagination states', async () => {
+  const mock = installMockMediaWiki();
+  const firstState = new Map();
+  const secondState = new Map();
+
+  try {
+    const firstPage = await getPageLinksBatch(['Page 0'], undefined, { paginationState: firstState });
+    const secondPage = await getPageLinksBatch(['Page 0'], undefined, { paginationState: secondState });
+    const continuedFirstPage = await getPageLinksBatch(
+      ['Page 0'], firstPage.continueToken, { paginationState: firstState },
+    );
+
+    expect(continuedFirstPage.pages[0]?.links).toHaveLength(150);
+    expect(firstState.size).toBe(0);
+    expect(secondState.size).toBe(1);
+
+    const continuedSecondPage = await getPageLinksBatch(
+      ['Page 0'], secondPage.continueToken, { paginationState: secondState },
+    );
+    expect(continuedSecondPage.pages[0]?.links).toHaveLength(150);
+    expect(secondState.size).toBe(0);
+  } finally {
+    mock.restore();
+  }
+});
+
 it('preserves expansion depth when baseDepth is greater than the normal crawl depth limit', async () => {
   const mock = installMockMediaWiki({ mode: 'topical' });
 

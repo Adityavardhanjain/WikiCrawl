@@ -1,5 +1,6 @@
 import Graph from 'graphology';
 import { getPageLinksBatch, getPageViews, titleToUrl } from './wikipedia';
+import type { PageLinksAccumulatedPage } from './wikipedia';
 import { isJunkTitle } from './filters';
 import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
 import { randomUUID } from 'node:crypto';
@@ -124,6 +125,16 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   let lastProgressDone = -1;
   let activeWork = 0;
   let requestsUsed = 0;
+  let budgetExhausted = false;
+  const consumeRequestBudget = (): boolean => {
+    if (signal?.aborted) return false;
+    if (requestsUsed >= requestBudget) {
+      budgetExhausted = true;
+      return false;
+    }
+    requestsUsed += 1;
+    return true;
+  };
   const configuredConcurrency = Number(process.env.CRAWL_CONCURRENCY ?? 3);
   const crawlConcurrency = Math.min(MAX_CRAWL_CONCURRENCY, Math.max(1, Math.trunc(configuredConcurrency) || 3));
 
@@ -132,11 +143,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     const pageViews = await getPageViews(layer.map((item) => item.title), {
       concurrency: crawlConcurrency,
       signal,
-      beforeRequest: () => {
-        if (signal?.aborted || requestsUsed >= requestBudget) return false;
-        requestsUsed += 1;
-        return true;
-      },
+      beforeRequest: consumeRequestBudget,
     });
     return [...layer].sort((left, right) => {
       const leftLowPriority = isLowPriorityTitle(left.title);
@@ -185,21 +192,20 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
     const batchTitles = batch.map(({ title }) => title);
     const paginationSessionId = randomUUID();
+    const paginationState = new Map<string, PageLinksAccumulatedPage>();
     const fetchBatch = async (titles: string[], continueToken?: string) => {
-      if (signal?.aborted || requestsUsed >= requestBudget) return null;
+      if (signal?.aborted) return null;
+      if (requestsUsed >= requestBudget) {
+        budgetExhausted = true;
+        return null;
+      }
 
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           return await getPageLinksBatch(titles, continueToken, {
             paginationSessionId,
-            beforeRequest: () => {
-              if (signal?.aborted || requestsUsed >= requestBudget) {
-                return false;
-              }
-
-              requestsUsed += 1;
-              return true;
-            },
+            paginationState,
+            beforeRequest: consumeRequestBudget,
             signal,
             timeoutMs: WIKIPEDIA_REQUEST_TIMEOUT_MS,
           });
@@ -378,6 +384,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
       continueToken = paginatedResponse.continueToken;
     }
+    if (continueToken && requestsUsed >= requestBudget) budgetExhausted = true;
 
     onBatch?.(progress.nodes.filter((node) => !batchNodeIds.has(node.id)), getNewAvailableEdges());
   };
@@ -407,9 +414,11 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
         }
         await processBatch(batches[nextBatchIndex++]);
       }
+      if (nextBatchIndex < batches.length && requestsUsed >= requestBudget) budgetExhausted = true;
     });
     await Promise.all(workers);
   }
+  if (progress.queue.length > 0 && requestsUsed >= requestBudget) budgetExhausted = true;
 
   const edgeKeys = new Set<string>();
   const edges: WikiEdge[] = [];
@@ -444,7 +453,7 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
     nodes: progress.nodes,
     edges,
     seedId: resolvedSeedId,
-    partial: progress.failedTitles.size > 0,
+    partial: progress.failedTitles.size > 0 || budgetExhausted,
     failedTitles: [...progress.failedTitles],
   };
 }

@@ -140,10 +140,46 @@ export interface PageViewsOptions {
   signal?: AbortSignal;
 }
 
-const accumulatedPages = new Map<string, {
+export interface PageLinksAccumulatedPage {
   resolvedTitle: string;
   links: string[];
-}>();
+}
+
+interface ExpiringPageLinksAccumulation extends PageLinksAccumulatedPage {
+  expiresAt: number;
+}
+
+const accumulatedPages = new Map<string, ExpiringPageLinksAccumulation>();
+const PAGE_LINK_ACCUMULATION_TTL_MS = 5 * 60 * 1000;
+const MAX_PAGE_LINK_ACCUMULATIONS = 1000;
+let accumulationCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleAccumulationCleanup(): void {
+  if (accumulationCleanupTimer) clearTimeout(accumulationCleanupTimer);
+  const nextExpiry = Math.min(...Array.from(accumulatedPages.values(), (value) => value.expiresAt));
+  if (!Number.isFinite(nextExpiry)) {
+    accumulationCleanupTimer = null;
+    return;
+  }
+
+  accumulationCleanupTimer = setTimeout(() => {
+    accumulationCleanupTimer = null;
+    pruneAccumulatedPages(Date.now());
+    scheduleAccumulationCleanup();
+  }, Math.max(0, nextExpiry - Date.now()));
+  accumulationCleanupTimer.unref?.();
+}
+
+function pruneAccumulatedPages(now: number): void {
+  for (const [key, value] of accumulatedPages) {
+    if (value.expiresAt <= now) accumulatedPages.delete(key);
+  }
+  while (accumulatedPages.size > MAX_PAGE_LINK_ACCUMULATIONS) {
+    const oldestKey = accumulatedPages.keys().next().value;
+    if (oldestKey === undefined) break;
+    accumulatedPages.delete(oldestKey);
+  }
+}
 
 function getAccumulationKey(sessionId: string, title: string): string {
   return `${sessionId}:${normalizeTitle(title)}`;
@@ -161,6 +197,7 @@ function continuationPageId(token?: string): number | undefined {
 export interface PageLinksBatchOptions {
   beforeRequest?: () => boolean;
   paginationSessionId?: string;
+  paginationState?: Map<string, PageLinksAccumulatedPage>;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -176,6 +213,37 @@ export async function getPageLinksBatch(
 
   const requestedTitles = titles.slice(0, MAX_BATCH_TITLES);
   const paginationSessionId = options.paginationSessionId ?? 'default';
+  const paginationState = options.paginationState;
+  const now = Date.now();
+  if (!paginationState) {
+    pruneAccumulatedPages(now);
+    scheduleAccumulationCleanup();
+  }
+  const readAccumulated = (title: string): PageLinksAccumulatedPage | undefined => {
+    if (paginationState) return paginationState.get(normalizeTitle(title));
+    const key = getAccumulationKey(paginationSessionId, title);
+    const value = accumulatedPages.get(key);
+    if (!value) return undefined;
+    value.expiresAt = now + PAGE_LINK_ACCUMULATION_TTL_MS;
+    return value;
+  };
+  const writeAccumulated = (title: string, value: PageLinksAccumulatedPage): void => {
+    if (paginationState) {
+      paginationState.set(normalizeTitle(title), value);
+      return;
+    }
+    accumulatedPages.delete(getAccumulationKey(paginationSessionId, title));
+    accumulatedPages.set(getAccumulationKey(paginationSessionId, title), {
+      ...value,
+      expiresAt: now + PAGE_LINK_ACCUMULATION_TTL_MS,
+    });
+    pruneAccumulatedPages(now);
+    scheduleAccumulationCleanup();
+  };
+  const deleteAccumulated = (title: string): void => {
+    if (paginationState) paginationState.delete(normalizeTitle(title));
+    else accumulatedPages.delete(getAccumulationKey(paginationSessionId, title));
+  };
   const cachedPages = new Map<string, PageLinksResult>();
   const missingTitles = requestedTitles.filter((title) => {
     if (continueToken) return true;
@@ -232,6 +300,7 @@ const fetchedPages = missingTitles.map((title) => {
   ));
 
   if (!page || page.missing) {
+    deleteAccumulated(title);
     return {
       title,
       resolvedTitle: title,
@@ -243,12 +312,7 @@ const fetchedPages = missingTitles.map((title) => {
 
   const pageLinks = page.links?.map((link) => link.title) || [];
 
-  const key = getAccumulationKey(
-    paginationSessionId,
-    title,
-  );
-
-  const accumulated = accumulatedPages.get(key) ?? {
+  const accumulated = readAccumulated(title) ?? {
     resolvedTitle: page.title || resolvedTitle,
     links: [],
   };
@@ -260,7 +324,7 @@ const fetchedPages = missingTitles.map((title) => {
   }
 
   accumulated.resolvedTitle = page.title || resolvedTitle;
-  accumulatedPages.set(key, accumulated);
+  writeAccumulated(title, accumulated);
 
   // MediaWiki's continuation token identifies the page whose
   // link listing should continue. If it points at this page,
@@ -289,12 +353,7 @@ for (let index = 0; index < fetchedPages.length; index += 1) {
     continue;
   }
 
-  const key = getAccumulationKey(
-    paginationSessionId,
-    requestedTitle
-  );
-
-  const accumulated = accumulatedPages.get(key);
+  const accumulated = readAccumulated(requestedTitle);
 
   const cachedPage: PageLinksResult = {
     title: page.title,
@@ -314,7 +373,7 @@ for (let index = 0; index < fetchedPages.length; index += 1) {
     });
   }
 
-  accumulatedPages.delete(key);
+  deleteAccumulated(requestedTitle);
 }
 
   return {

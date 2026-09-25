@@ -52,6 +52,33 @@ describe('crawl route', () => {
     }
   });
 
+  it('fetches a cold crawl seed link page only once', async () => {
+    const mock = installMockMediaWiki({ mode: 'topical' });
+    const originalFetch = globalThis.fetch;
+    const seedLinkFetches: string[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.searchParams.get('prop') === 'links') {
+        const titles = (url.searchParams.get('titles') ?? '').split('|');
+        if (titles.includes('Page 0')) seedLinkFetches.push(url.searchParams.get('plcontinue') ?? 'initial');
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+
+    try {
+      const response = await postCrawl({ seedTitle: 'Page 0', depth: 1, maxNodes: 50 }, '192.0.2.93');
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(body).toContain('event: done');
+      expect(seedLinkFetches).toEqual(['initial']);
+      expect(mock.stats.linkRowsDownloaded).toBeGreaterThan(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      mock.restore();
+    }
+  });
+
   it('rejects an expansion with too many known nodes', async () => {
   const knownNodeIds = Array.from(
     { length: 501 },
@@ -200,6 +227,58 @@ it('still accepts a valid expansion request', async () => {
     expect(body).toContain('"result"');
   } finally {
     mock.restore();
+  }
+});
+
+it('preserves expansion edges between known nodes and from new nodes to known nodes', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input) => {
+    const url = new URL(input.toString());
+    const property = url.searchParams.get('prop');
+    if (property === 'pageviews') {
+      return Response.json({ query: { pages: [] } });
+    }
+    const titles = (url.searchParams.get('titles') ?? '').split('|').filter(Boolean);
+    return Response.json({
+      query: {
+        pages: titles.map((title, index) => ({
+          pageid: index + 1,
+          title,
+          links: title === 'Expanded'
+            ? [{ title: 'Page 1' }, { title: 'New A' }]
+            : title === 'New A'
+              ? [{ title: 'Known B' }, { title: 'New A' }, { title: 'Outside' }]
+              : [],
+        })),
+      },
+    });
+  }) as typeof fetch;
+  vi.mocked(database.setCachedResult).mockClear();
+
+  try {
+    const response = await postCrawl({
+      seedTitle: 'Expanded',
+      depth: 1,
+      maxNodes: 50,
+      knownNodeIds: ['Expanded', 'Page 1', 'Known B'],
+      knownEdgeIndexPairs: [[0, 1]],
+      baseDepth: 0,
+    }, '192.0.2.92');
+    const stream = await response.text();
+    const doneEvent = stream.split('\n\n').find((event) => event.startsWith('event: done'));
+    const payloadLine = doneEvent?.split('\n').find((line) => line.startsWith('data:'));
+    const result = JSON.parse(payloadLine!.slice(5)).result as CrawlResult;
+    const edgeKeys = result.edges.map((edge) => `${edge.source}|${edge.target}`);
+
+    expect(result.nodes.map((node) => node.id)).toEqual(['New A']);
+    expect(result.edges).toContainEqual({ source: 'Expanded', target: 'Page 1' });
+    expect(result.edges).toContainEqual({ source: 'New A', target: 'Known B' });
+    expect(edgeKeys).not.toContain('New A|New A');
+    expect(edgeKeys).not.toContain('New A|Outside');
+    expect(new Set(edgeKeys).size).toBe(edgeKeys.length);
+    expect(database.setCachedResult).not.toHaveBeenCalled();
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

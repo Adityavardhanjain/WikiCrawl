@@ -200,6 +200,27 @@ function runPendingFrames() {
     expect(await screen.findByText('Ranking pages and finding communities')).toBeInTheDocument();
   });
 
+  it('does not automatically retry a failed crawl but keeps manual retry available', async () => {
+    window.history.replaceState({}, '', '/?seed=Alpha&depth=1&nodes=50');
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Home />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(crawlChannels).toHaveLength(1));
+    crawlChannels[0].emit('error', { error: 'Upstream failure' });
+    crawlChannels[0].close();
+
+    const retryButton = await screen.findByRole('button', { name: 'Retry' });
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(crawlChannels).toHaveLength(1);
+
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(crawlChannels).toHaveLength(2));
+  });
+
   it('keeps a partially expanded node retryable and marks it expanded only after completion', async () => {
   window.history.replaceState(
     {},

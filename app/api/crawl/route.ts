@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { crawlWikipedia, buildGraph, sanitizeGraphData } from '@/lib/crawler';
 import { analyzeGraph } from '@/lib/graphAnalysis';
 import { getCachedResult, setCachedResult, generateCacheKey } from '@/lib/db';
-import { getPageLinks, searchWikipedia } from '@/lib/wikipedia';
+import { getPageLinksBatch, searchWikipedia } from '@/lib/wikipedia';
+import type { PageLinksAccumulatedPage } from '@/lib/wikipedia';
 import { nanoid } from 'nanoid';
 import type { CrawlProgress, CrawlResult, CrawlRequest, WikiNode, WikiEdge } from '@/types/graph';
 import { createSlidingWindowRateLimiter } from '@/lib/rateLimit';
@@ -44,6 +45,30 @@ function closeStream(controller: ReadableStreamDefaultController): void {
   } catch {
     // The client may have disconnected before the crawl completed.
   }
+}
+
+function sanitizeExpansionDelta(
+  knownNodeIds: string[],
+  nodes: WikiNode[],
+  edges: WikiEdge[],
+): { nodes: WikiNode[]; edges: WikiEdge[] } {
+  const knownIds = new Set(knownNodeIds);
+  const newNodes = sanitizeGraphData(nodes, []).nodes.filter((node) => !knownIds.has(node.id));
+  const validIds = new Set([...knownIds, ...newNodes.map((node) => node.id)]);
+  const validEdges = new Map<string, WikiEdge>();
+
+  for (const edge of edges) {
+    if (
+      !edge?.source || !edge.target ||
+      edge.source === edge.target ||
+      !validIds.has(edge.source) ||
+      !validIds.has(edge.target)
+    ) continue;
+
+    validEdges.set(`${edge.source}|${edge.target}`, edge);
+  }
+
+  return { nodes: newNodes, edges: [...validEdges.values()] };
 }
 
 export async function POST(request: NextRequest) {
@@ -234,11 +259,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(cachedResult);
     }
 
-    const seedPage = await getPageLinks(seedTitle, undefined, {
+    const seedPaginationState = new Map<string, PageLinksAccumulatedPage>();
+    const seedPageBatch = await getPageLinksBatch([seedTitle], undefined, {
+      paginationState: seedPaginationState,
       signal: request.signal,
       timeoutMs: 10_000,
     });
-    if (seedPage.missing) {
+    const seedPage = seedPageBatch.pages[0];
+    if (!seedPage || seedPage.missing) {
       const suggestions = await searchWikipedia(seedTitle)
         .then((results) => results.map((result) => result.title))
         .catch(() => []);
@@ -261,6 +289,8 @@ export async function POST(request: NextRequest) {
             maxNodes: validatedMaxNodes,
             knownIds,
             baseDepth: validatedBaseDepth,
+            seedPage: { pages: [seedPage], continueToken: seedPageBatch.continueToken },
+            seedPaginationState,
             signal: request.signal,
             onProgress: (progress) => {
               crawlProgress = progress;
@@ -276,7 +306,9 @@ export async function POST(request: NextRequest) {
             sendStreamEvent(controller, 'warning', { failedTitles });
           }
 
-          const { nodes: deltaNodes, edges: deltaEdges } = sanitizeGraphData(crawledNodes, crawledEdges);
+          const { nodes: deltaNodes, edges: deltaEdges } = isExpand
+            ? sanitizeExpansionDelta(knownIds, crawledNodes, crawledEdges)
+            : sanitizeGraphData(crawledNodes, crawledEdges);
           const deltaNodeIds = new Set(deltaNodes.map((node) => node.id));
 
           // Reconstruct the caller's known edges (decoded from index pairs) so pagerank/betweenness/

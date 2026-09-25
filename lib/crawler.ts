@@ -1,6 +1,6 @@
 import Graph from 'graphology';
 import { getPageLinksBatch, getPageViews, titleToUrl } from './wikipedia';
-import type { PageLinksAccumulatedPage } from './wikipedia';
+import type { PageLinksAccumulatedPage, PageLinksBatchResult } from './wikipedia';
 import { isJunkTitle } from './filters';
 import type { CrawlProgress, WikiNode, WikiEdge } from '@/types/graph';
 import { randomUUID } from 'node:crypto';
@@ -74,6 +74,10 @@ export interface CrawlOptions {
   knownIds?: string[];
   /** Depth of the seed within the caller's larger graph; new node depths are offset by this. */
   baseDepth?: number;
+  /** Link data already fetched by the caller for seed validation. */
+  seedPage?: PageLinksBatchResult;
+  /** Accumulation state associated with a pre-fetched seed page. */
+  seedPaginationState?: Map<string, PageLinksAccumulatedPage>;
   onProgress?: (progress: CrawlProgress) => void;
   onBatch?: (nodes: WikiNode[], edges: WikiEdge[]) => void;
   /** AbortSignal for cancellation */
@@ -87,7 +91,18 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
   partial: boolean;
   failedTitles: string[];
 }> {
-  const { seedTitle, depth, maxNodes, knownIds = [], baseDepth = 0, onProgress, onBatch, signal } = options;
+  const {
+    seedTitle,
+    depth,
+    maxNodes,
+    knownIds = [],
+    baseDepth = 0,
+    seedPage,
+    seedPaginationState,
+    onProgress,
+    onBatch,
+    signal,
+  } = options;
   const requestBudget = getCrawlRequestBudget(maxNodes, depth);
   const progress: CrawlState = {
     nodes: [],
@@ -192,9 +207,14 @@ export async function crawlWikipedia(options: CrawlOptions): Promise<{
 
     const batchTitles = batch.map(({ title }) => title);
     const paginationSessionId = randomUUID();
-    const paginationState = new Map<string, PageLinksAccumulatedPage>();
+    const paginationState = batchTitles.includes(seedTitle) && seedPaginationState
+      ? seedPaginationState
+      : new Map<string, PageLinksAccumulatedPage>();
     const fetchBatch = async (titles: string[], continueToken?: string) => {
       if (signal?.aborted) return null;
+      if (!continueToken && seedPage && titles.includes(seedTitle)) {
+        return seedPage;
+      }
       if (requestsUsed >= requestBudget) {
         budgetExhausted = true;
         return null;

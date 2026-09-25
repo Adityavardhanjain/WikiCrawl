@@ -353,6 +353,7 @@ export default function Home() {
       }
     },
     enabled: submittedRequest !== null,
+    retry: false,
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
 

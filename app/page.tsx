@@ -568,6 +568,16 @@ export default function Home() {
       return;
     }
 
+    if (!selectedNodeId) {
+  window.history.pushState(
+    {
+      ...(window.history.state ?? {}),
+      wikicrawlNodePanel: true,
+    },
+    '',
+  );
+}
+
     setSelectedNodeId(node.id);
     setFocusedNode(node.id);
     setFocusedCommunityId(null);

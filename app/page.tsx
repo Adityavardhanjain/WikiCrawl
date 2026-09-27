@@ -392,6 +392,21 @@ export default function Home() {
   }, [displayData, pathSelection]);
 
   useEffect(() => {
+  const handlePopState = () => {
+    setSelectedNodeId(null);
+    setFocusedNode(null);
+    setFocusedCommunityId(null);
+    setPathSelection(null);
+  };
+
+  window.addEventListener('popstate', handlePopState);
+
+  return () => {
+    window.removeEventListener('popstate', handlePopState);
+  };
+}, []);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setPathSelection(null);

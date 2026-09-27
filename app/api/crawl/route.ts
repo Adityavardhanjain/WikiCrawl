@@ -7,6 +7,7 @@ import type { PageLinksAccumulatedPage } from '@/lib/wikipedia';
 import { nanoid } from 'nanoid';
 import type { CrawlProgress, CrawlResult, CrawlRequest, WikiNode, WikiEdge } from '@/types/graph';
 import { createSlidingWindowRateLimiter } from '@/lib/rateLimit';
+import { trackEvent } from '@/lib/analytics';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,6 +74,8 @@ function sanitizeExpansionDelta(
 
 export async function POST(request: NextRequest) {
   try {
+    const crawlId = nanoid();
+    const crawlStartedAt = Date.now();
     const body = (await request.json()) as CrawlRequest;
     const { seedTitle, depth, maxNodes, knownNodeIds, knownEdgeIndexPairs, baseDepth } = body;
 
@@ -258,6 +261,16 @@ export async function POST(request: NextRequest) {
     if (cachedResult) {
       return NextResponse.json(cachedResult);
     }
+      await trackEvent({
+      event_name: 'crawl_started',
+      session_id: crawlId,
+      metadata: {
+        seedTitle,
+        depth: validatedDepth,
+        maxNodes: validatedMaxNodes,
+        isExpand,
+      },
+    });
 
     const seedPaginationState = new Map<string, PageLinksAccumulatedPage>();
     const seedPageBatch = await getPageLinksBatch([seedTitle], undefined, {
@@ -370,12 +383,39 @@ export async function POST(request: NextRequest) {
           if (!isExpand && !partial) {
             setCachedResult(cacheKey, seedTitle, validatedDepth, validatedMaxNodes, result);
           }
-          sendStreamEvent(controller, 'done', { result });
-          clearInterval(heartbeat);
-          closeStream(controller);
+         await trackEvent({
+          event_name: 'crawl_completed',
+          session_id: crawlId,
+          duration_ms: Date.now() - crawlStartedAt,
+          metadata: {
+            seedTitle,
+            depth: validatedDepth,
+            maxNodes: validatedMaxNodes,
+            nodeCount: result.nodes.length,
+            edgeCount: result.edges.length,
+            partial,
+            isExpand,
+          },
+        });
+        
+        sendStreamEvent(controller, 'done', { result });
+        clearInterval(heartbeat);
+        closeStream(controller);
         } catch (error) {
           clearInterval(heartbeat);
           console.error('Crawl error:', error);
+          await trackEvent({
+          event_name: 'crawl_failed',
+          session_id: crawlId,
+          duration_ms: Date.now() - crawlStartedAt,
+          metadata: {
+            seedTitle,
+            depth: validatedDepth,
+            maxNodes: validatedMaxNodes,
+            isExpand,
+            error: String(error),
+          },
+        });
           sendStreamEvent(controller, 'error', {
             error: 'Failed to crawl Wikipedia',
             details: String(error),

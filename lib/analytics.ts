@@ -20,12 +20,11 @@ export async function trackEvent(event: AnalyticsEvent): Promise<void> {
       `${SUPABASE_URL}/rest/v1/analytics_events`,
       {
         method: 'POST',
-        headers: {
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          'Content-Type': 'application/json',
-          Prefer: 'return=minimal',
-        },
+       headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
         body: JSON.stringify({
           event_name: event.event_name,
           session_id: event.session_id ?? null,

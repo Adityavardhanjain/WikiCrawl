@@ -1614,6 +1614,24 @@ body { color: var(--paper); }
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
 }
 
+.node-detail-backdrop {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .node-detail-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(2px);
+    cursor: default;
+  }
+}
+
 .crawl-warning button { color: var(--signal); }
 
 .reduce-effects .node-action-spinner { animation: none; }

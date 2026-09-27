@@ -645,12 +645,17 @@ export default function Home() {
     expandMutation.mutate(nodeId);
   }, [expandMutation, expandedNodeIds, expandingNodeId]);
 
-  const handleCloseSelection = useCallback(() => {
-    setSelectedNodeId(null);
-    setFocusedNode(null);
-    setFocusedCommunityId(null);
-    setPathSelection(null);
-  }, []);
+const handleCloseSelection = useCallback(() => {
+  if (window.history.state?.wikicrawlNodePanel) {
+    window.history.back();
+    return;
+  }
+
+  setSelectedNodeId(null);
+  setFocusedNode(null);
+  setFocusedCommunityId(null);
+  setPathSelection(null);
+}, []);
 
   // Load from URL params
   useEffect(() => {

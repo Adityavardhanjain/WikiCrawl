@@ -28,6 +28,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <meta
+          name="google-site-verification"
+          content="0yJlFEgw5f_6CHdB7O7_ataM8Zbh4eleFXKfXeBGxwY"
+        />
+      </head>
       <body className="app-fonts">
         <Providers>
           {children}

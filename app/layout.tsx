@@ -5,7 +5,7 @@ import { Analytics } from '@vercel/analytics/next';
 import { SITE_ORIGIN, SITE_URL } from '@/lib/site';
 
 export const metadata: Metadata = {
-  title: 'WikiCrawl – Explore Wikipedia Connections in an Interactive Graph',
+  title: 'WikiCrawl: Explore Wikipedia Connections',
   metadataBase: SITE_URL,
   applicationName: 'WikiCrawl',
   description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, map connected topics, and discover unexpected connections with WikiCrawl.',
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     type: 'website',
     siteName: 'WikiCrawl',
     url: SITE_ORIGIN,
-    title: 'WikiCrawl – Explore Wikipedia Connections in an Interactive Graph',
+    title: 'WikiCrawl: Explore Wikipedia Connections',
     description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, map connected topics, and discover unexpected connections.',
     locale: 'en_US',
     images: [
@@ -52,7 +52,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'WikiCrawl – Explore Wikipedia Connections in an Interactive Graph',
+    title: 'WikiCrawl: Explore Wikipedia Connections',
     description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, map connected topics, and discover unexpected connections.',
     images: ['/twitter-image'],
   },

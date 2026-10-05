@@ -26,9 +26,10 @@ describe('getWikipediaRelationship', () => {
       source: 'Albert Einstein',
       target: 'Theory of relativity',
       relation: 'developed',
+      context: 'lead',
       explanation: 'WikiCrawl interprets the passage as: Albert Einstein developed Theory of relativity.',
       evidence: 'Albert Einstein developed the Theory of relativity.',
-      section: 'Introduction',
+      section: 'Lead',
       sourceUrl: 'https://en.wikipedia.org/wiki/Albert_Einstein',
       sourceContextFound: true,
     };

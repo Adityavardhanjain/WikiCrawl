@@ -1,11 +1,12 @@
-import type { WikiRelationship } from '@/types/graph';
+import type { WikiConnectionContext, WikiRelationship } from '@/types/graph';
 
 interface ContextSection {
   title: string;
   content: string;
+  isLead: boolean;
 }
 
-const NON_ARTICLE_SECTIONS = /^(?:references|notes|further reading|external links|see also|bibliography|sources|citations|works cited|notes and references)$/i;
+const NON_ARTICLE_SECTIONS = /^(?:references|notes|further reading|external links|bibliography|sources|citations|works cited|notes and references)$/i;
 const MAX_EVIDENCE_LENGTH = 480;
 
 function normalizeTitle(title: string): string {
@@ -58,9 +59,10 @@ function getSections(wikitext: string): ContextSection[] {
   const sections: ContextSection[] = [];
   let title = 'Introduction';
   let content = '';
+  let isLead = true;
 
   const saveSection = () => {
-    if (content.trim()) sections.push({ title, content });
+    if (content.trim()) sections.push({ title, content, isLead });
     content = '';
   };
 
@@ -69,6 +71,7 @@ function getSections(wikitext: string): ContextSection[] {
     if (heading) {
       saveSection();
       title = plainText(heading[2]) || 'Article';
+      isLead = false;
     } else {
       content += `${line}\n`;
     }
@@ -78,14 +81,28 @@ function getSections(wikitext: string): ContextSection[] {
   return sections;
 }
 
+function getConnectionContext(section: ContextSection): WikiConnectionContext | null {
+  if (section.isLead) return 'lead';
+  if (/^see also$/i.test(section.title.trim())) return 'see_also';
+  if (NON_ARTICLE_SECTIONS.test(section.title)) return null;
+  return 'article';
+}
+
 function findEvidence(
   wikitext: string,
   target: string,
-): { evidence: string; section: string; targetLabel: string } | null {
+): {
+  evidence: string | null;
+  section: string;
+  targetLabel: string;
+  context: WikiConnectionContext;
+} | null {
   const normalizedTarget = normalizeTitle(target);
+  let seeAlsoContext: ReturnType<typeof findEvidence> = null;
 
   for (const section of getSections(wikitext)) {
-    if (NON_ARTICLE_SECTIONS.test(section.title)) continue;
+    const contextType = getConnectionContext(section);
+    if (!contextType) continue;
 
     for (const paragraph of section.content.split(/\n\s*\n/)) {
       if (paragraph.includes('{|')) continue;
@@ -118,11 +135,32 @@ function findEvidence(
       if (sentence.length > MAX_EVIDENCE_LENGTH) {
         sentence = `${sentence.slice(0, MAX_EVIDENCE_LENGTH - 1).trimEnd()}…`;
       }
-      if (sentence) return { evidence: sentence, section: section.title, targetLabel: linkLabel };
+      if (!sentence) continue;
+
+      if (contextType === 'see_also') {
+        const relation = inferRelation(sentence, linkLabel);
+        const evidence = relation === 'Related to' ? null : sentence;
+        if (!seeAlsoContext || (!seeAlsoContext.evidence && evidence)) {
+          seeAlsoContext = {
+            evidence,
+            section: section.title,
+            targetLabel: linkLabel,
+            context: contextType,
+          };
+        }
+        continue;
+      }
+
+      return {
+        evidence: sentence,
+        section: contextType === 'lead' ? 'Lead' : section.title,
+        targetLabel: linkLabel,
+        context: contextType,
+      };
     }
   }
 
-  return null;
+  return seeAlsoContext;
 }
 
 const RELATION_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
@@ -184,15 +222,20 @@ export function interpretWikiLinkContext(
   wikitext: string,
 ): WikiRelationship {
   const context = findEvidence(wikitext, target);
-  const relation = context ? inferRelation(context.evidence, context.targetLabel) : 'Related to';
-  const explanation = relation === 'Related to'
-    ? `Wikipedia links ${source} to ${target}, but the surrounding context does not support a more specific relationship.`
+  const relation = context?.evidence
+    ? inferRelation(context.evidence, context.targetLabel)
+    : 'Related to';
+  const explanation = relation === 'Related to' && context?.context === 'see_also'
+    ? 'Wikipedia lists this topic as a related topic.'
+    : relation === 'Related to'
+      ? `Wikipedia links ${source} to ${target}, but the surrounding context does not support a more specific relationship.`
     : `WikiCrawl interprets the passage as: ${source} ${relation} ${target}.`;
 
   return {
     source,
     target,
     relation,
+    context: context?.context ?? null,
     explanation,
     evidence: context?.evidence ?? null,
     section: context?.section ?? null,

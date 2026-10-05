@@ -15,10 +15,13 @@ export interface WikiEdge {
   target: string;
 }
 
+export type WikiConnectionContext = 'lead' | 'article' | 'see_also';
+
 export interface WikiRelationship {
   source: string;
   target: string;
   relation: string;
+  context: WikiConnectionContext | null;
   explanation: string;
   evidence: string | null;
   section: string | null;

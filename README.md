@@ -23,7 +23,7 @@ Starting from a Wikipedia article, WikiCrawl follows outgoing links up to a conf
 * **Interactive graph visualization:** Navigate the graph with zoom, fit-to-view, reset, and edge-display controls.
 * **Community and depth coloring:** Color nodes by detected community or distance from the starting article.
 * **Page inspection:** Select a node to explore its summary, graph metrics, community assignment, and connected pages.
-* **Relationship context:** Inspect a directed connection on demand to see WikiCrawl's cautious interpretation and the supporting Wikipedia passage and section.
+* **Relationship context:** Inspect a directed connection on demand to see WikiCrawl's interpretation, whether Wikipedia establishes the link in the lead, article body, or See also section, and the supporting source passage when available.
 * **Incremental expansion:** Crawl outward from a selected page and merge newly discovered pages into the existing graph.
 * **Deeper exploration:** Restart from the original seed with a greater crawl depth and a chosen page limit.
 * **Shortest-path discovery:** Find a shortest route between pages already present in the graph.
@@ -78,9 +78,9 @@ During an initial crawl, nodes, edges, progress, and analysis results are stream
 
 Sigma renders the graph in the browser. ForceAtlas2 runs in a worker, keeping graph layout computation off the main UI thread.
 
-**6. Relationship inspection**
+**6. Relationship and source-context inspection**
 
-Relationship context is fetched only when a user opens a connection in the node details panel. WikiCrawl reads the source article's wikitext, finds the linked passage and section, and applies a small set of explicit phrase rules. The passage is evidence; the relationship label is WikiCrawl's interpretation. When no supported phrase is found, the relationship remains **Related to**. Results are cached separately from crawl data so analysis never delays crawling, streaming, or initial graph rendering.
+Relationship context is fetched only when a user opens a connection in the node details panel. WikiCrawl reads the source article's wikitext once, identifies whether the link is in the lead, article body, or See also section, and applies a small set of explicit phrase rules to supporting prose. The passage is evidence; the relationship label is WikiCrawl's interpretation; the location is a separate source context. A See also listing defaults to **Related to** unless its own prose supports a more specific interpretation. Results are cached separately from crawl data so analysis never delays crawling, streaming, or initial graph rendering.
 
 ### Incremental expansion
 

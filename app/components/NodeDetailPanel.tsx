@@ -89,6 +89,20 @@ function NodeDetailPanel({
   if (!node || !data) return null;
 
   const community = data.communities.find(c => c.id === node.communityId);
+  const contextLabel = relationshipQuery.data?.context === 'lead'
+    ? 'Lead'
+    : relationshipQuery.data?.context === 'article'
+      ? 'Article body'
+      : relationshipQuery.data?.context === 'see_also'
+        ? 'See also'
+        : 'Unavailable';
+  const sourceSectionUrl = relationshipQuery.data
+    ? relationshipQuery.data.context === 'see_also'
+      ? `${relationshipQuery.data.sourceUrl}#See_also`
+      : relationshipQuery.data.context === 'article' && relationshipQuery.data.section
+        ? `${relationshipQuery.data.sourceUrl}#${encodeURIComponent(relationshipQuery.data.section.replace(/ /g, '_'))}`
+        : relationshipQuery.data.sourceUrl
+    : null;
 
   return (
   <>
@@ -372,38 +386,66 @@ function NodeDetailPanel({
               </div>
             ) : relationshipQuery.data ? (
               <>
-                <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="font-medium text-white">{relationshipQuery.data.source}</span>
-                  <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-1 font-semibold text-cyan-100">
-                    {relationshipQuery.data.relation}
-                  </span>
-                  <span className="font-medium text-white">{relationshipQuery.data.target}</span>
+                <div className="space-y-1 text-center text-xs">
+                  <p className="font-medium text-white">{relationshipQuery.data.source}</p>
+                  <p className="text-slate-500" aria-hidden="true">↓</p>
+                  <p className="font-semibold text-cyan-100">{relationshipQuery.data.relation}</p>
+                  <p className="text-slate-500" aria-hidden="true">↓</p>
+                  <p className="font-medium text-white">{relationshipQuery.data.target}</p>
                 </div>
-                <p className="text-xs leading-relaxed text-slate-300">
-                  Wikipedia link: {relationshipQuery.data.source} → {relationshipQuery.data.target}.
-                  {' '}{relationshipQuery.data.explanation}
-                </p>
+                <div>
+                  <h5 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Connection context</h5>
+                  <p data-testid="relationship-context" className="text-xs text-slate-200">{contextLabel ?? 'Unavailable'}</p>
+                </div>
+                <div>
+                  <h5 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Why</h5>
+                  <p className="text-xs leading-relaxed text-slate-300">{relationshipQuery.data.explanation}</p>
+                </div>
                 {relationshipQuery.data.evidence ? (
                   <details className="text-xs">
-                    <summary className="min-h-11 cursor-pointer py-3 font-medium text-cyan-200 hover:text-white">
-                      View source passage{relationshipQuery.data.section ? ` · ${relationshipQuery.data.section}` : ''}
+                    <summary className="min-h-11 cursor-pointer py-3 font-semibold uppercase tracking-wide text-cyan-200 hover:text-white">
+                      Source evidence{relationshipQuery.data.section ? ` · ${relationshipQuery.data.section}` : ''}
                     </summary>
                     <blockquote className="border-l-2 border-cyan-300/30 pl-3 leading-relaxed text-slate-300">
                       {relationshipQuery.data.evidence}
                     </blockquote>
                     <a
-                      href={relationshipQuery.data.sourceUrl}
+                      href={sourceSectionUrl ?? relationshipQuery.data.sourceUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="mt-2 inline-flex min-h-11 items-center text-cyan-200 underline hover:text-white"
                     >
-                      Open source article on Wikipedia
+                      Open source{relationshipQuery.data.context === 'article' ? ' section' : ' article'} on Wikipedia
                     </a>
                   </details>
+                ) : relationshipQuery.data.context === 'see_also' ? (
+                  <div className="space-y-1">
+                    <h5 className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Source evidence</h5>
+                    <p className="text-xs text-slate-300">Wikipedia lists this topic in the See also section.</p>
+                    <a
+                      href={sourceSectionUrl ?? relationshipQuery.data.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-11 items-center text-cyan-200 underline hover:text-white"
+                    >
+                      Open See also section on Wikipedia
+                    </a>
+                  </div>
                 ) : (
-                  <p className="text-xs leading-relaxed text-slate-400">
-                    No matching passage was found in the source article, so WikiCrawl leaves this as “Related to”.
-                  </p>
+                  <div className="space-y-1">
+                    <h5 className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Source evidence</h5>
+                    <p className="text-xs leading-relaxed text-slate-400">
+                      No matching passage was found in the source article. WikiCrawl leaves this as “Related to”.
+                    </p>
+                    <a
+                      href={sourceSectionUrl ?? relationshipQuery.data.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-11 items-center text-cyan-200 underline hover:text-white"
+                    >
+                      Open source article on Wikipedia
+                    </a>
+                  </div>
                 )}
               </>
             ) : null}

@@ -186,9 +186,10 @@ describe('NodeDetailPanel summary', () => {
       source: 'Albert Einstein',
       target: 'Theory of relativity',
       relation: 'developed',
+      context: 'lead',
       explanation: 'WikiCrawl interprets this passage as: Albert Einstein developed Theory of relativity.',
       evidence: 'Albert Einstein developed the theory of relativity.',
-      section: 'Introduction',
+      section: 'Lead',
       sourceUrl: 'https://en.wikipedia.org/wiki/Albert_Einstein',
       sourceContextFound: true,
     });
@@ -207,13 +208,54 @@ describe('NodeDetailPanel summary', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Explain connection: Albert Einstein to Theory of relativity' }));
     expect(await screen.findByText('developed')).toBeInTheDocument();
-    const sourcePassage = screen.getByText('View source passage · Introduction').closest('details');
+    expect(screen.getByTestId('relationship-context')).toHaveTextContent('Lead');
+    expect(screen.getByText('Why')).toBeInTheDocument();
+    const sourcePassage = screen.getByText('Source evidence · Lead').closest('details');
     expect(sourcePassage).not.toHaveAttribute('open');
-    fireEvent.click(screen.getByText('View source passage · Introduction'));
+    fireEvent.click(screen.getByText('Source evidence · Lead'));
     expect(await screen.findByText('Albert Einstein developed the theory of relativity.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open source article on Wikipedia' })).toHaveAttribute(
       'href',
       'https://en.wikipedia.org/wiki/Albert_Einstein',
+    );
+  });
+
+  it('shows See also as context without claiming a specific relationship', async () => {
+    vi.spyOn(summaryModule, 'fetchSummary').mockResolvedValue({
+      extract: 'An example article.',
+      description: null,
+    });
+    vi.spyOn(relationshipModule, 'fetchRelationship').mockResolvedValue({
+      source: 'Example',
+      target: 'Related topic',
+      relation: 'Related to',
+      context: 'see_also',
+      explanation: 'Wikipedia lists this topic as a related topic.',
+      evidence: null,
+      section: 'See also',
+      sourceUrl: 'https://en.wikipedia.org/wiki/Example',
+      sourceContextFound: true,
+    });
+    const source = makeNode({ id: 'Example', title: 'Example' });
+    const target = makeNode({ id: 'Related topic', title: 'Related topic' });
+    const data: CrawlResult = {
+      ...makeData(source),
+      nodes: [source, target],
+      edges: [{ source: source.id, target: target.id }],
+    };
+
+    render(
+      <MemoizedNodeDetailPanel node={source} data={data} onClose={vi.fn()} onExpand={vi.fn()} />,
+      { wrapper: createWrapper() },
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Explain connection: Example to Related topic' }));
+    expect(await screen.findByTestId('relationship-context')).toHaveTextContent('See also');
+    expect(screen.getByText('Related to')).toBeInTheDocument();
+    expect(screen.getByText('Wikipedia lists this topic as a related topic.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open See also section on Wikipedia' })).toHaveAttribute(
+      'href',
+      'https://en.wikipedia.org/wiki/Example#See_also',
     );
   });
 });

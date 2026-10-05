@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import path from 'path';
-import type { CrawlResult, WikiRelationship } from '@/types/graph';
+import type { CrawlResult, WikiConnectionContext, WikiRelationship } from '@/types/graph';
 
 type BetterSqlite3 = typeof import('better-sqlite3');
 type Database = InstanceType<BetterSqlite3>;
@@ -132,6 +132,10 @@ function normalizePageTitle(title: string): string {
   return title.replace(/_/g, ' ').trim().toLowerCase();
 }
 
+function isConnectionContext(value: unknown): value is WikiConnectionContext | null {
+  return value === null || value === 'lead' || value === 'article' || value === 'see_also';
+}
+
 export function getCachedRelationship(source: string, target: string): WikiRelationship | null {
   const sourceKey = normalizePageTitle(source);
   const targetKey = normalizePageTitle(target);
@@ -157,7 +161,15 @@ export function getCachedRelationship(source: string, target: string): WikiRelat
       `).run(sourceKey, targetKey);
       return null;
     }
-    const relationship = JSON.parse(row.result) as WikiRelationship;
+    const parsed = JSON.parse(row.result) as Partial<WikiRelationship> | null;
+    if (!parsed || !isConnectionContext(parsed.context)) {
+      database.prepare(`
+        DELETE FROM relationship_cache
+        WHERE source_key = ? AND target_key = ?
+      `).run(sourceKey, targetKey);
+      return null;
+    }
+    const relationship = parsed as WikiRelationship;
     memoryRelationships.set(key, relationship, RELATIONSHIP_CACHE_TTL_MS);
     return relationship;
   } catch (error) {

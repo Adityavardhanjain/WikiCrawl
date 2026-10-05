@@ -22,6 +22,7 @@ describe('database cache fallback', () => {
       source: 'Albert Einstein',
       target: 'Theory of relativity',
       relation: 'developed',
+      context: 'lead',
       explanation: 'WikiCrawl interprets the passage as a development relationship.',
       evidence: 'Einstein developed the theory.',
       section: 'Work',

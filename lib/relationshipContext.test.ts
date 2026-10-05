@@ -14,7 +14,8 @@ He received many awards.`,
 
     expect(result.relation).toBe('developed');
     expect(result.evidence).toBe('Albert Einstein was a physicist who developed the Theory of relativity.');
-    expect(result.section).toBe('Introduction');
+    expect(result.section).toBe('Lead');
+    expect(result.context).toBe('lead');
     expect(result.sourceContextFound).toBe(true);
     expect(result.explanation).toContain('WikiCrawl interprets');
   });
@@ -64,7 +65,56 @@ She proposed [[Target page]] as a solution.
     );
 
     expect(result.section).toBe('Work');
+    expect(result.context).toBe('article');
     expect(result.relation).toBe('proposed');
+  });
+
+  it('classifies a See also listing without inventing a detailed relationship', () => {
+    const result = interpretWikiLinkContext(
+      'Example',
+      'Target page',
+      '== See also ==\n* [[Target page]]',
+    );
+
+    expect(result.context).toBe('see_also');
+    expect(result.section).toBe('See also');
+    expect(result.relation).toBe('Related to');
+    expect(result.explanation).toBe('Wikipedia lists this topic as a related topic.');
+    expect(result.evidence).toBeNull();
+  });
+
+  it('prefers article prose when a link also appears in See also', () => {
+    const result = interpretWikiLinkContext(
+      'Example',
+      'Target page',
+      '== History ==\nThe page was founded by the [[Target page]].\n\n== See also ==\n* [[Target page]]',
+    );
+
+    expect(result.context).toBe('article');
+    expect(result.relation).toBe('founded');
+    expect(result.evidence).toContain('founded by the Target page');
+  });
+
+  it('can use explicit prose under See also when it supports a specific relationship', () => {
+    const result = interpretWikiLinkContext(
+      'Example',
+      'Target page',
+      '== See also ==\nExample developed [[Target page]] as an approach.',
+    );
+
+    expect(result.context).toBe('see_also');
+    expect(result.relation).toBe('developed');
+    expect(result.evidence).toContain('developed Target page');
+  });
+
+  it('does not confuse an article section named Introduction with the lead', () => {
+    const result = interpretWikiLinkContext(
+      'Example',
+      'Target page',
+      '== Introduction ==\nThis section mentions [[Target page]].',
+    );
+
+    expect(result.context).toBe('article');
   });
 
   it('returns a generic relationship when no supporting passage is found', () => {

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WikiRelationship } from '@/types/graph';
 
 vi.mock('@/lib/wikipedia', () => ({
   getWikipediaRelationship: vi.fn(),
@@ -25,10 +26,11 @@ describe('relationship route', () => {
   });
 
   it('returns on-demand Wikipedia relationship context', async () => {
-    const expected = {
+    const expected: WikiRelationship = {
       source: 'Albert Einstein',
       target: 'Theory of relativity',
       relation: 'developed',
+      context: 'lead',
       explanation: 'WikiCrawl interprets the passage as: Albert Einstein developed Theory of relativity.',
       evidence: 'Albert Einstein developed the theory of relativity.',
       section: 'Introduction',

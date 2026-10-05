@@ -1,5 +1,3 @@
-Yes — here is the **raw Markdown content**. Copy everything inside the code block into `CONTRIBUTING.md`.
-
 ```markdown
 # Contributing to WikiCrawl
 

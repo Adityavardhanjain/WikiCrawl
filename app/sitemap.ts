@@ -1,13 +1,10 @@
 import type { MetadataRoute } from 'next';
+import { SITE_ORIGIN } from '@/lib/site';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ?? 'https://wiki-crawl.vercel.app';
-
   return [
     {
-      url: baseUrl,
-      lastModified: new Date(),
+      url: `${SITE_ORIGIN}/`,
     },
   ];
 }

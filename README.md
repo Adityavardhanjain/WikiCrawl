@@ -195,7 +195,7 @@ All environment variables are optional.
 | `WIKI_CONTACT`         | Contact information included in the Wikimedia API user agent           | Not set                                                   |
 | `CRAWL_CONCURRENCY`    | Requested crawler concurrency, capped by the server at 3               | `3`                                                       |
 | `WIKICRAWL_DB_PATH`    | SQLite database location                                               | `./wiki-crawl.db` locally; `/tmp/wiki-crawl.db` on Vercel |
-| `NEXT_PUBLIC_SITE_URL` | Public origin used to construct absolute metadata and share-image URLs | `https://wiki-crawl.vercel.app`                           |
+| `NEXT_PUBLIC_SITE_URL` | Public origin used for canonical metadata, sitemap discovery, and share-image URLs | `https://wiki-crawl.vercel.app`                  |
 
 ### Local environment
 

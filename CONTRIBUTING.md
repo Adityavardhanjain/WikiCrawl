@@ -1,4 +1,3 @@
-```markdown
 # Contributing to WikiCrawl
 
 Thank you for considering contributing to WikiCrawl.
@@ -85,7 +84,6 @@ You can also contribute by:
 - Testing new functionality
 - Sharing WikiCrawl with people who may find it useful
 
----
 
 # Getting Started
 

@@ -7,6 +7,8 @@ vi.mock('../lib/db', () => ({
   setCachedPageLinks: vi.fn(),
   getCachedPageViews: vi.fn(() => null),
   setCachedPageViews: vi.fn(),
+  getCachedRelationship: vi.fn(() => null),
+  setCachedRelationship: vi.fn(),
   getCachedResult: vi.fn(() => null),
   setCachedResult: vi.fn(),
   generateCacheKey: vi.fn(() => 'test-cache-key'),

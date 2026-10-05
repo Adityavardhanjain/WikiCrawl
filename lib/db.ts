@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import path from 'path';
-import type { CrawlResult } from '@/types/graph';
+import type { CrawlResult, WikiRelationship } from '@/types/graph';
 
 type BetterSqlite3 = typeof import('better-sqlite3');
 type Database = InstanceType<BetterSqlite3>;
@@ -12,6 +12,8 @@ const RESOLVED_DB_PATH = process.env.WIKICRAWL_DB_PATH
   || (process.env.VERCEL ? '/tmp/wiki-crawl.db' : DB_PATH);
 const PAGE_LINKS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PAGE_VIEWS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const RELATIONSHIP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const RELATIONSHIP_CACHE_MAX_ENTRIES = 5000;
 const CRAWL_RESULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const DB_FAILURE_COOLDOWN_MS = 60 * 1000;
 const MEMORY_PAGE_LINKS_LIMIT = 500;
@@ -63,6 +65,7 @@ class LruCache<T> {
 
 const memoryPageLinks = new LruCache<CachedPageLinks>(MEMORY_PAGE_LINKS_LIMIT);
 const memoryPageViews = new LruCache<number>(MEMORY_PAGE_LINKS_LIMIT);
+const memoryRelationships = new LruCache<WikiRelationship>(MEMORY_PAGE_LINKS_LIMIT);
 const memoryResults = new LruCache<CrawlResult>(MEMORY_RESULTS_LIMIT);
 
 function rememberDbFailure(error: unknown): void {
@@ -109,6 +112,14 @@ function getDb(): Database | null {
         views INTEGER NOT NULL,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS relationship_cache (
+        source_key TEXT NOT NULL,
+        target_key TEXT NOT NULL,
+        result TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (source_key, target_key)
+      );
     `);
     return db;
   } catch (error) {
@@ -119,6 +130,70 @@ function getDb(): Database | null {
 
 function normalizePageTitle(title: string): string {
   return title.replace(/_/g, ' ').trim().toLowerCase();
+}
+
+export function getCachedRelationship(source: string, target: string): WikiRelationship | null {
+  const sourceKey = normalizePageTitle(source);
+  const targetKey = normalizePageTitle(target);
+  const key = `${sourceKey}\u0000${targetKey}`;
+  const memoryValue = memoryRelationships.get(key);
+  if (memoryValue) return memoryValue;
+
+  try {
+    const database = getDb();
+    if (!database) return null;
+    const row = database.prepare(`
+      SELECT result, created_at
+      FROM relationship_cache
+      WHERE source_key = ? AND target_key = ?
+    `).get(sourceKey, targetKey) as { result: string; created_at: string } | undefined;
+
+    if (!row) return null;
+    const createdAt = Date.parse(row.created_at);
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > RELATIONSHIP_CACHE_TTL_MS) {
+      database.prepare(`
+        DELETE FROM relationship_cache
+        WHERE source_key = ? AND target_key = ?
+      `).run(sourceKey, targetKey);
+      return null;
+    }
+    const relationship = JSON.parse(row.result) as WikiRelationship;
+    memoryRelationships.set(key, relationship, RELATIONSHIP_CACHE_TTL_MS);
+    return relationship;
+  } catch (error) {
+    rememberDbFailure(error);
+    return null;
+  }
+}
+
+export function setCachedRelationship(relationship: WikiRelationship): void {
+  const sourceKey = normalizePageTitle(relationship.source);
+  const targetKey = normalizePageTitle(relationship.target);
+  const key = `${sourceKey}\u0000${targetKey}`;
+  memoryRelationships.set(key, relationship, RELATIONSHIP_CACHE_TTL_MS);
+
+  try {
+    const database = getDb();
+    if (!database) return;
+    database.prepare(`
+      INSERT OR REPLACE INTO relationship_cache (source_key, target_key, result, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(sourceKey, targetKey, JSON.stringify(relationship), new Date().toISOString());
+    database.prepare(`
+      DELETE FROM relationship_cache
+      WHERE created_at < ?
+    `).run(new Date(Date.now() - RELATIONSHIP_CACHE_TTL_MS).toISOString());
+    database.prepare(`
+      DELETE FROM relationship_cache
+      WHERE rowid NOT IN (
+        SELECT rowid FROM relationship_cache
+        ORDER BY created_at DESC
+        LIMIT ?
+      )
+    `).run(RELATIONSHIP_CACHE_MAX_ENTRIES);
+  } catch (error) {
+    rememberDbFailure(error);
+  }
 }
 
 export function getCachedPageLinks(title: string): CachedPageLinks | null {
@@ -296,4 +371,3 @@ export function setCachedResult(
     memoryResults.set(cacheKey, result, CRAWL_RESULT_CACHE_TTL_MS);
   }
 }
-

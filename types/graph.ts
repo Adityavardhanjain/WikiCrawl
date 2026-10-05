@@ -15,6 +15,17 @@ export interface WikiEdge {
   target: string;
 }
 
+export interface WikiRelationship {
+  source: string;
+  target: string;
+  relation: string;
+  explanation: string;
+  evidence: string | null;
+  section: string | null;
+  sourceUrl: string;
+  sourceContextFound: boolean;
+}
+
 export interface Community {
   id: number;
   label: string;

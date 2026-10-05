@@ -23,6 +23,7 @@ Starting from a Wikipedia article, WikiCrawl follows outgoing links up to a conf
 * **Interactive graph visualization:** Navigate the graph with zoom, fit-to-view, reset, and edge-display controls.
 * **Community and depth coloring:** Color nodes by detected community or distance from the starting article.
 * **Page inspection:** Select a node to explore its summary, graph metrics, community assignment, and connected pages.
+* **Relationship context:** Inspect a directed connection on demand to see WikiCrawl's cautious interpretation and the supporting Wikipedia passage and section.
 * **Incremental expansion:** Crawl outward from a selected page and merge newly discovered pages into the existing graph.
 * **Deeper exploration:** Restart from the original seed with a greater crawl depth and a chosen page limit.
 * **Shortest-path discovery:** Find a shortest route between pages already present in the graph.
@@ -39,12 +40,13 @@ WikiCrawl combines a bounded Wikipedia crawler, graph analysis, server-sent even
 flowchart LR
     U[Browser] --> S[Wikipedia Search Route]
     U --> C[Crawl Route]
+    U --> RR[Relationship Route]
 
     S --> W[MediaWiki API]
-    C --> R[Bounded Crawler]
-    R --> W
-
-    R --> A[Graphology Analysis]
+    C --> BC[Bounded Crawler]
+    RR --> W
+    BC --> W
+    BC --> A[Graphology Analysis]
     A --> E[Server-Sent Events]
     E --> U
 
@@ -75,6 +77,10 @@ During an initial crawl, nodes, edges, progress, and analysis results are stream
 **5. Interactive visualization**
 
 Sigma renders the graph in the browser. ForceAtlas2 runs in a worker, keeping graph layout computation off the main UI thread.
+
+**6. Relationship inspection**
+
+Relationship context is fetched only when a user opens a connection in the node details panel. WikiCrawl reads the source article's wikitext, finds the linked passage and section, and applies a small set of explicit phrase rules. The passage is evidence; the relationship label is WikiCrawl's interpretation. When no supported phrase is found, the relationship remains **Related to**. Results are cached separately from crawl data so analysis never delays crawling, streaming, or initial graph rendering.
 
 ### Incremental expansion
 

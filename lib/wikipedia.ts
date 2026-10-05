@@ -1,4 +1,13 @@
-import { getCachedPageLinks, getCachedPageViews, setCachedPageLinks, setCachedPageViews } from './db';
+import {
+  getCachedPageLinks,
+  getCachedPageViews,
+  getCachedRelationship,
+  setCachedPageLinks,
+  setCachedPageViews,
+  setCachedRelationship,
+} from './db';
+import { interpretWikiLinkContext } from './relationshipContext';
+import type { WikiRelationship } from '@/types/graph';
 
 const WIKIPEDIA_API_BASE = 'https://en.wikipedia.org/w/api.php';
 const WIKI_CONTACT = process.env.WIKI_CONTACT?.trim();
@@ -40,11 +49,17 @@ interface WikipediaPage {
   pageviews?: Record<string, number | null>;
 }
 
+interface WikipediaParse {
+  title?: string;
+  wikitext?: string | { '*': string };
+}
+
 interface WikipediaResponse {
   query?: {
     pages?: WikipediaPage[];
     redirects?: { from?: string; title?: string; to: string }[];
   };
+  parse?: WikipediaParse;
   'continue'?: {
     plcontinue?: string;
   };
@@ -389,6 +404,33 @@ export async function getPageLinks(
 ): Promise<PageLinksResult> {
   const result = await getPageLinksBatch([title], continueToken, options);
   return result.pages[0] || { title, resolvedTitle: title, links: [] };
+}
+
+export async function getWikipediaRelationship(
+  source: string,
+  target: string,
+): Promise<WikiRelationship> {
+  const cached = getCachedRelationship(source, target);
+  if (cached) return cached;
+
+  const response = await fetchWikipedia({
+    action: 'parse',
+    page: source,
+    prop: 'wikitext',
+    formatversion: '2',
+  }, {
+    maxRetries: 0,
+    timeoutMs: 10_000,
+  });
+  const rawWikitext = response.parse?.wikitext;
+  const wikitext = typeof rawWikitext === 'string' ? rawWikitext : rawWikitext?.['*'];
+  if (wikitext === undefined) {
+    throw new Error(`Wikipedia did not return source text for "${source}"`);
+  }
+
+  const relationship = interpretWikiLinkContext(source, target, wikitext);
+  setCachedRelationship(relationship);
+  return relationship;
 }
 
 export async function getPageViews(

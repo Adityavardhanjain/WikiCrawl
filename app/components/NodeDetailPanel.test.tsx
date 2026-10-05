@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/re
 import type { CrawlResult, WikiNode } from '@/types/graph';
 import { MemoizedNodeDetailPanel } from './NodeDetailPanel';
 import * as summaryModule from '@/lib/summary';
+import * as relationshipModule from '@/lib/relationshipClient';
 
 function createWrapper() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -107,5 +108,45 @@ describe('NodeDetailPanel summary', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Explore deeper/ }));
     expect(onExpand).toHaveBeenCalledWith(node.id);
+  });
+
+  it('loads a relationship on demand and progressively reveals its source passage', async () => {
+    vi.spyOn(summaryModule, 'fetchSummary').mockResolvedValue({
+      extract: 'A physicist.',
+      description: null,
+    });
+    vi.spyOn(relationshipModule, 'fetchRelationship').mockResolvedValue({
+      source: 'Albert Einstein',
+      target: 'Theory of relativity',
+      relation: 'developed',
+      explanation: 'WikiCrawl interprets this passage as: Albert Einstein developed Theory of relativity.',
+      evidence: 'Albert Einstein developed the theory of relativity.',
+      section: 'Introduction',
+      sourceUrl: 'https://en.wikipedia.org/wiki/Albert_Einstein',
+      sourceContextFound: true,
+    });
+    const source = makeNode({ id: 'Albert Einstein', title: 'Albert Einstein' });
+    const target = makeNode({ id: 'Theory of relativity', title: 'Theory of relativity' });
+    const data: CrawlResult = {
+      ...makeData(source),
+      nodes: [source, target],
+      edges: [{ source: source.id, target: target.id }],
+    };
+
+    render(
+      <MemoizedNodeDetailPanel node={source} data={data} onClose={vi.fn()} onExpand={vi.fn()} />,
+      { wrapper: createWrapper() },
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Explain connection: Albert Einstein to Theory of relativity' }));
+    expect(await screen.findByText('developed')).toBeInTheDocument();
+    const sourcePassage = screen.getByText('View source passage · Introduction').closest('details');
+    expect(sourcePassage).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('View source passage · Introduction'));
+    expect(await screen.findByText('Albert Einstein developed the theory of relativity.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open source article on Wikipedia' })).toHaveAttribute(
+      'href',
+      'https://en.wikipedia.org/wiki/Albert_Einstein',
+    );
   });
 });

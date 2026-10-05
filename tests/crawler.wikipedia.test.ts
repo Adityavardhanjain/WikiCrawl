@@ -11,6 +11,8 @@ vi.mock('../lib/db', () => ({
   }),
   getCachedPageViews: vi.fn((title: string) => pageViewCache.get(title.toLowerCase()) ?? null),
   setCachedPageViews: vi.fn((title: string, views: number) => pageViewCache.set(title.toLowerCase(), views)),
+  getCachedRelationship: vi.fn(() => null),
+  setCachedRelationship: vi.fn(),
 }));
 
 import { crawlWikipedia, getCrawlRequestBudget } from '../lib/crawler';

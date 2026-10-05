@@ -2,8 +2,10 @@
 
 import { memo, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import type { WikiNode, CrawlResult, PathResult } from '@/types/graph';
+import { useQuery } from '@tanstack/react-query';
+import type { WikiNode, CrawlResult, PathResult, WikiEdge } from '@/types/graph';
 import { buildAdjacency } from '@/lib/adjacency';
+import { fetchRelationship } from '@/lib/relationshipClient';
 import { useNodeSummary } from './useNodeSummary';
 
 interface NodeDetailPanelProps {
@@ -34,6 +36,7 @@ function NodeDetailPanel({
   const [pathPickerOpen, setPathPickerOpen] = useState(false);
   const [pathQuery, setPathQuery] = useState('');
   const [highlightedPathOption, setHighlightedPathOption] = useState(0);
+  const [selectedConnection, setSelectedConnection] = useState<WikiEdge | null>(null);
   const connectedNodes = useMemo(() => {
     if (!node || !data) return [];
     const nodesById = new Map(data.nodes.map((candidate) => [candidate.id, candidate]));
@@ -42,7 +45,18 @@ function NodeDetailPanel({
       .filter((connectedNode): connectedNode is WikiNode => Boolean(connectedNode));
   }, [data, node]);
 
+  const connectionEdges = useMemo(() => {
+    if (!node || !data) return [];
+    return data.edges.filter((edge) => edge.source === node.id || edge.target === node.id).slice(0, 6);
+  }, [data, node]);
+
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useNodeSummary(node?.id ?? null);
+  const relationshipQuery = useQuery({
+    queryKey: ['relationship', selectedConnection?.source, selectedConnection?.target],
+    queryFn: ({ signal }) => fetchRelationship(selectedConnection!.source, selectedConnection!.target, signal),
+    enabled: Boolean(selectedConnection),
+    staleTime: 60 * 60 * 1000,
+  });
 
   const pathOptions = useMemo(() => {
     if (!node || !data) return [];
@@ -57,6 +71,7 @@ function NodeDetailPanel({
     setPathPickerOpen(false);
     setPathQuery('');
     setHighlightedPathOption(0);
+    setSelectedConnection(null);
   }, [node?.id]);
 
   useEffect(() => {
@@ -264,11 +279,99 @@ function NodeDetailPanel({
           <div>
             <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wide">Connected topics</h4>
             <div className="space-y-1">
-              {connectedNodes.slice(0, 6).map((connectedNode) => (
-                <p key={connectedNode.id} className="truncate text-xs text-slate-300">{connectedNode.title}</p>
-              ))}
+              {connectionEdges.map((edge) => {
+                const source = data.nodes.find((candidate) => candidate.id === edge.source);
+                const target = data.nodes.find((candidate) => candidate.id === edge.target);
+                if (!source || !target) return null;
+                const isSelected = selectedConnection?.source === edge.source && selectedConnection?.target === edge.target;
+                return (
+                  <button
+                    key={`${edge.source}|${edge.target}`}
+                    type="button"
+                    aria-label={`Explain connection: ${source.title} to ${target.title}`}
+                    aria-pressed={isSelected}
+                    onClick={() => setSelectedConnection(edge)}
+                    className={`block min-h-11 w-full truncate rounded-lg px-2 py-2 text-left text-xs transition ${
+                      isSelected ? 'bg-cyan-400/15 text-cyan-100' : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <span className="font-medium">{source.title}</span>
+                    <span className="px-1.5 text-slate-500" aria-hidden="true">→</span>
+                    <span className="font-medium">{target.title}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
+        )}
+
+        {selectedConnection && (
+          <section
+            className="space-y-3 rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-3"
+            aria-label="Connection details"
+            aria-live="polite"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-cyan-200">How they connect</h4>
+              <button
+                type="button"
+                onClick={() => setSelectedConnection(null)}
+                className="min-h-11 px-2 text-xs text-slate-400 underline hover:text-white"
+              >
+                Back to connections
+              </button>
+            </div>
+            {relationshipQuery.isLoading ? (
+              <p className="text-xs text-slate-400">Checking the Wikipedia passage…</p>
+            ) : relationshipQuery.isError ? (
+              <div className="space-y-2">
+                <p className="text-xs text-amber-200">Couldn&apos;t load the source context for this connection.</p>
+                <button
+                  type="button"
+                  onClick={() => void relationshipQuery.refetch()}
+                  className="min-h-11 text-xs text-cyan-200 underline hover:text-white"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : relationshipQuery.data ? (
+              <>
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="font-medium text-white">{relationshipQuery.data.source}</span>
+                  <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-1 font-semibold text-cyan-100">
+                    {relationshipQuery.data.relation}
+                  </span>
+                  <span className="font-medium text-white">{relationshipQuery.data.target}</span>
+                </div>
+                <p className="text-xs leading-relaxed text-slate-300">
+                  Wikipedia link: {relationshipQuery.data.source} → {relationshipQuery.data.target}.
+                  {' '}{relationshipQuery.data.explanation}
+                </p>
+                {relationshipQuery.data.evidence ? (
+                  <details className="text-xs">
+                    <summary className="min-h-11 cursor-pointer py-3 font-medium text-cyan-200 hover:text-white">
+                      View source passage{relationshipQuery.data.section ? ` · ${relationshipQuery.data.section}` : ''}
+                    </summary>
+                    <blockquote className="border-l-2 border-cyan-300/30 pl-3 leading-relaxed text-slate-300">
+                      {relationshipQuery.data.evidence}
+                    </blockquote>
+                    <a
+                      href={relationshipQuery.data.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex min-h-11 items-center text-cyan-200 underline hover:text-white"
+                    >
+                      Open source article on Wikipedia
+                    </a>
+                  </details>
+                ) : (
+                  <p className="text-xs leading-relaxed text-slate-400">
+                    No matching passage was found in the source article, so WikiCrawl leaves this as “Related to”.
+                  </p>
+                )}
+              </>
+            ) : null}
+          </section>
         )}
 
         {/* Community Members */}

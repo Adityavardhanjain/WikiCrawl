@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { CrawlResult } from '@/types/graph';
+import type { CrawlResult, WikiRelationship } from '@/types/graph';
 
 const originalPath = process.env.WIKICRAWL_DB_PATH;
 const warningSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -18,14 +18,26 @@ describe('database cache fallback', () => {
   it('warns once and serves page links from memory after SQLite fails', async () => {
     const db = await import('./db');
     const page = { title: 'Memory page', resolvedTitle: 'Memory page', links: ['Next'], complete: true };
+    const relationship: WikiRelationship = {
+      source: 'Albert Einstein',
+      target: 'Theory of relativity',
+      relation: 'developed',
+      explanation: 'WikiCrawl interprets the passage as a development relationship.',
+      evidence: 'Einstein developed the theory.',
+      section: 'Work',
+      sourceUrl: 'https://en.wikipedia.org/wiki/Albert_Einstein',
+      sourceContextFound: true,
+    };
 
     for (let index = 0; index < 50; index += 1) {
       expect(db.getCachedPageLinks(`missing-${index}`)).toBeNull();
       db.setCachedPageLinks({ ...page, title: `Memory page ${index}` });
     }
+    db.setCachedRelationship(relationship);
 
     expect(warningSpy).toHaveBeenCalledTimes(1);
     expect(db.getCachedPageLinks('Memory page 49')).toEqual({ ...page, title: 'Memory page 49' });
+    expect(db.getCachedRelationship('albert einstein', 'theory_of_relativity')).toEqual(relationship);
   });
 
   it('evicts the oldest page-link fallback entry at its bound', async () => {

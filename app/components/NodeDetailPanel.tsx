@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useQuery } from '@tanstack/react-query';
 import type { WikiNode, CrawlResult, PathResult, WikiEdge } from '@/types/graph';
@@ -37,6 +37,7 @@ function NodeDetailPanel({
   const [pathQuery, setPathQuery] = useState('');
   const [highlightedPathOption, setHighlightedPathOption] = useState(0);
   const [selectedConnection, setSelectedConnection] = useState<WikiEdge | null>(null);
+  const connectionSectionRef = useRef<HTMLDivElement>(null);
   const connectedNodes = useMemo(() => {
     if (!node || !data) return [];
     const nodesById = new Map(data.nodes.map((candidate) => [candidate.id, candidate]));
@@ -129,8 +130,106 @@ function NodeDetailPanel({
         </button>
       </div>
 
+      <section className="node-explore" aria-label="Explore this page">
+        <div className="node-explore-heading">
+          <h4>Explore</h4>
+          <span>from this page</span>
+        </div>
+        <div className="node-explore-toolbelt">
+          <button
+            type="button"
+            className="node-explore-action"
+            aria-controls={connectedNodes.length > 0 ? 'node-connections' : undefined}
+            onClick={() => connectionSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
+            disabled={connectedNodes.length === 0}
+          >
+            <span>Connections</span>
+            <span className="node-explore-count">{connectedNodes.length}</span>
+          </button>
+          <button
+            type="button"
+            aria-expanded={pathPickerOpen}
+            aria-controls="node-path-picker"
+            onClick={() => setPathPickerOpen((open) => !open)}
+            className="node-explore-action"
+          >
+            Find a path
+          </button>
+          <button
+            type="button"
+            onClick={() => onExpand(node.id)}
+            disabled={isExpanding || isExpanded}
+            className="node-explore-action node-explore-action-primary"
+          >
+            {isExpanding ? (
+              <><span className="node-action-spinner" aria-hidden="true" /> Exploring</>
+            ) : isExpanded ? (
+              <>Explored <span aria-hidden="true">✓</span></>
+            ) : (
+              <>Explore deeper <span aria-hidden="true">↗</span></>
+            )}
+          </button>
+        </div>
+        <p className="node-explore-hint">
+          {connectedNodes.length > 0
+            ? 'Select a connection to see how the topics are related.'
+            : 'No connections yet. Explore deeper to grow this map.'}
+        </p>
+        {pathPickerOpen && (
+          <div id="node-path-picker" className="node-path-picker">
+            <input
+              autoFocus
+              role="combobox"
+              aria-label="Find path to a node"
+              aria-controls="path-target-list"
+              aria-expanded="true"
+              aria-activedescendant={pathOptions[highlightedPathOption] ? `path-target-${pathOptions[highlightedPathOption].id}` : undefined}
+              value={pathQuery}
+              onChange={(event) => {
+                setPathQuery(event.target.value);
+                setHighlightedPathOption(0);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setPathPickerOpen(false);
+                } else if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setHighlightedPathOption((current) => Math.min(current + 1, pathOptions.length - 1));
+                } else if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setHighlightedPathOption((current) => Math.max(current - 1, 0));
+                } else if (event.key === 'Enter' && pathOptions[highlightedPathOption]) {
+                  event.preventDefault();
+                  choosePathTarget(pathOptions[highlightedPathOption]);
+                }
+              }}
+              placeholder="Search crawled nodes"
+              className="w-full rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none ring-cyan-400 placeholder:text-slate-500 focus:ring-2"
+            />
+            <div id="path-target-list" role="listbox" className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-950 shadow-xl">
+              {pathOptions.length > 0 ? pathOptions.map((candidate, index) => (
+                <button
+                  key={candidate.id}
+                  id={`path-target-${candidate.id}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === highlightedPathOption}
+                  onMouseEnter={() => setHighlightedPathOption(index)}
+                  onClick={() => choosePathTarget(candidate)}
+                  className={`block w-full truncate px-3 py-2 text-left text-xs ${index === highlightedPathOption ? 'bg-cyan-400/15 text-cyan-100' : 'text-slate-300 hover:bg-white/5'}`}
+                >
+                  {candidate.title}
+                </button>
+              )) : (
+                <p className="px-3 py-2 text-xs text-slate-500">No matching crawled nodes</p>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* Content */}
-      <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
+      <div className="node-detail-content p-4 space-y-4 max-h-96 overflow-y-auto">
         {/* Summary: thumbnail, description, extract */}
         {(summaryLoading || summary?.thumbnail) && (
           <div data-testid="node-summary-thumbnail" className="relative w-full aspect-[16/9] overflow-hidden rounded-xl bg-slate-800/60">
@@ -181,69 +280,6 @@ function NodeDetailPanel({
           <MetricCard label="Cluster" value={community?.label?.slice(0, 18) || 'Unclustered'} color="yellow" />
         </div>
 
-        <div className="space-y-2">
-          <button
-            type="button"
-            aria-expanded={pathPickerOpen}
-            aria-controls="path-target-list"
-            onClick={() => setPathPickerOpen((open) => !open)}
-            className="w-full rounded-xl border border-cyan-400/25 bg-cyan-400/10 px-3 py-2.5 text-left text-sm font-medium text-cyan-200 transition hover:bg-cyan-400/20 hover:text-white"
-          >
-            Find path to...
-          </button>
-          {pathPickerOpen && (
-            <div className="relative">
-              <input
-                autoFocus
-                role="combobox"
-                aria-label="Find path to a node"
-                aria-controls="path-target-list"
-                aria-expanded="true"
-                aria-activedescendant={pathOptions[highlightedPathOption] ? `path-target-${pathOptions[highlightedPathOption].id}` : undefined}
-                value={pathQuery}
-                onChange={(event) => {
-                  setPathQuery(event.target.value);
-                  setHighlightedPathOption(0);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    setPathPickerOpen(false);
-                  } else if (event.key === 'ArrowDown') {
-                    event.preventDefault();
-                    setHighlightedPathOption((current) => Math.min(current + 1, pathOptions.length - 1));
-                  } else if (event.key === 'ArrowUp') {
-                    event.preventDefault();
-                    setHighlightedPathOption((current) => Math.max(current - 1, 0));
-                  } else if (event.key === 'Enter' && pathOptions[highlightedPathOption]) {
-                    event.preventDefault();
-                    choosePathTarget(pathOptions[highlightedPathOption]);
-                  }
-                }}
-                placeholder="Search crawled nodes"
-                className="w-full rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none ring-cyan-400 placeholder:text-slate-500 focus:ring-2"
-              />
-              <div id="path-target-list" role="listbox" className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-950 shadow-xl">
-                {pathOptions.length > 0 ? pathOptions.map((candidate, index) => (
-                  <button
-                    key={candidate.id}
-                    id={`path-target-${candidate.id}`}
-                    type="button"
-                    role="option"
-                    aria-selected={index === highlightedPathOption}
-                    onMouseEnter={() => setHighlightedPathOption(index)}
-                    onClick={() => choosePathTarget(candidate)}
-                    className={`block w-full truncate px-3 py-2 text-left text-xs ${index === highlightedPathOption ? 'bg-cyan-400/15 text-cyan-100' : 'text-slate-300 hover:bg-white/5'}`}
-                  >
-                    {candidate.title}
-                  </button>
-                )) : (
-                  <p className="px-3 py-2 text-xs text-slate-500">No matching crawled nodes</p>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
         {pathSelection && (
           <div className="space-y-3 rounded-xl border border-cyan-400/25 bg-cyan-400/5 p-3" aria-live="polite">
             <div className="flex items-center justify-between gap-2">
@@ -276,8 +312,8 @@ function NodeDetailPanel({
         )}
 
         {connectedNodes.length > 0 && (
-          <div>
-            <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wide">Connected topics</h4>
+          <div id="node-connections" ref={connectionSectionRef}>
+            <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wide">Connections</h4>
             <div className="space-y-1">
               {connectionEdges.map((edge) => {
                 const source = data.nodes.find((candidate) => candidate.id === edge.source);
@@ -404,20 +440,6 @@ function NodeDetailPanel({
 
         {/* Actions */}
         <div className="node-detail-actions pt-2">
-          <button
-            type="button"
-            onClick={() => onExpand(node.id)}
-            disabled={isExpanding || isExpanded}
-            className="node-explore-button"
-          >
-            {isExpanding ? (
-              <><span className="node-action-spinner" aria-hidden="true" /> Finding new connections</>
-            ) : isExpanded ? (
-              <><span aria-hidden="true">✓</span> Explored</>
-            ) : (
-              <>Explore deeper <span aria-hidden="true">↗</span></>
-            )}
-          </button>
           <a
             href={node.url}
             target="_blank"

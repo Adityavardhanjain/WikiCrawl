@@ -110,6 +110,73 @@ describe('NodeDetailPanel summary', () => {
     expect(onExpand).toHaveBeenCalledWith(node.id);
   });
 
+  it('shows the exploration toolbelt above the summary and scrolls to connections', () => {
+    vi.spyOn(summaryModule, 'fetchSummary').mockReturnValue(new Promise(() => {}));
+    const node = makeNode();
+    const connectedNode = makeNode({ id: 'Quantum field theory', title: 'Quantum field theory' });
+    const data: CrawlResult = {
+      ...makeData(node),
+      nodes: [node, connectedNode],
+      edges: [{ source: node.id, target: connectedNode.id }],
+    };
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+
+    try {
+      render(
+        <MemoizedNodeDetailPanel node={node} data={data} onClose={vi.fn()} onExpand={vi.fn()} />,
+        { wrapper: createWrapper() },
+      );
+
+      const explore = screen.getByRole('region', { name: 'Explore this page' });
+      const summary = screen.getByTestId('node-summary-skeleton');
+      expect(explore.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByRole('button', { name: /Connections/ })).toBeInTheDocument();
+      expect(screen.getByText('Select a connection to see how the topics are related.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Find a path' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Explore deeper/ })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Connections/ }));
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
+    } finally {
+      if (originalScrollIntoView) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+      }
+    }
+  });
+
+  it('opens the path picker from the exploration toolbelt', () => {
+    vi.spyOn(summaryModule, 'fetchSummary').mockReturnValue(new Promise(() => {}));
+    const node = makeNode();
+    const target = makeNode({ id: 'Quantum field theory', title: 'Quantum field theory' });
+    const data: CrawlResult = {
+      ...makeData(node),
+      nodes: [node, target],
+      edges: [{ source: node.id, target: target.id }],
+    };
+    const onFindPath = vi.fn();
+
+    render(
+      <MemoizedNodeDetailPanel
+        node={node}
+        data={data}
+        onClose={vi.fn()}
+        onExpand={vi.fn()}
+        onFindPath={onFindPath}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Find a path' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Quantum field theory' }));
+
+    expect(onFindPath).toHaveBeenCalledWith(node.id, target.id);
+    expect(screen.queryByRole('combobox', { name: 'Find path to a node' })).not.toBeInTheDocument();
+  });
+
   it('loads a relationship on demand and progressively reveals its source passage', async () => {
     vi.spyOn(summaryModule, 'fetchSummary').mockResolvedValue({
       extract: 'A physicist.',

@@ -3,11 +3,15 @@ import './globals.css';
 import { Providers } from './providers';
 import { Analytics } from '@vercel/analytics/next';
 import { SITE_ORIGIN, SITE_URL } from '@/lib/site';
+import { siteStructuredData } from '@/lib/siteStructuredData';
 
 export const metadata: Metadata = {
   title: 'WikiCrawl — Explore Wikipedia as an Interactive Knowledge Graph',
   metadataBase: SITE_URL,
   applicationName: 'WikiCrawl',
+  icons: {
+    icon: [{ url: '/favicon.svg', type: 'image/svg+xml', sizes: '64x64' }],
+  },
   description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, discover unexpected connections, and find your next Wikipedia rabbit hole with WikiCrawl.',
   keywords: [
     'Wikipedia graph',
@@ -58,28 +62,6 @@ export const metadata: Metadata = {
   },
 };
 
-const structuredData = {
-  '@context': 'https://schema.org',
-  '@type': 'WebApplication',
-  name: 'WikiCrawl',
-  description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, map connected topics, and discover unexpected connections.',
-  url: `${SITE_ORIGIN}/`,
-  applicationCategory: 'EducationalApplication',
-  operatingSystem: 'Any',
-  inLanguage: 'en',
-  isAccessibleForFree: true,
-  offers: {
-    '@type': 'Offer',
-    price: 0,
-    priceCurrency: 'USD',
-  },
-  featureList: [
-    'Explore links between Wikipedia articles in an interactive graph',
-    'Visualize topic communities and article distances',
-    'Find shortest paths between connected articles',
-  ],
-};
-
 export default function RootLayout({
   children,
 }: {
@@ -95,7 +77,7 @@ export default function RootLayout({
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(structuredData).replace(/</g, '\\u003c'),
+            __html: JSON.stringify(siteStructuredData).replace(/</g, '\\u003c'),
           }}
         />
       </head>

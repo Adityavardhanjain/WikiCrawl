@@ -34,6 +34,12 @@ Graph metrics and community assignments are calculated over the crawled subgraph
 
 WikiCrawl combines a bounded Wikipedia crawler, graph analysis, server-sent events, and an interactive graph renderer.
 
+### Curated discovery pages
+
+The static `/explore` and `/learn` routes are separate from the live crawler. Curated topic definitions live in `lib/exploreTopics.ts`; the published learn articles live in `lib/learnArticles.ts`. Topic pages render authored text without a Wikipedia request, and use validated, versioned graph JSON from `data/explore/` when a preview has been generated. The existing global social image is retained for the homepage, while each explore topic has a generated share image.
+
+Run `npm run generate:explore` to generate only the Black Holes preview. Pass curated slugs to select specific topics, or pass `--all` to opt in to sequential generation for every topic. Each run uses the existing depth-1 crawler with a 24-page cap, reports failures, validates output, and writes each JSON file atomically. Generated files are intended to be reviewed and version-controlled; route rendering never initiates a crawl.
+
 ### Request and data flow
 
 ```mermaid

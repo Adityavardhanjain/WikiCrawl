@@ -9,6 +9,7 @@
     "start": "next start",
     "bench": "vitest bench tests",
     "lint": "eslint .",
+    "generate:explore": "tsx scripts/generate-explore-data.ts",
     "probe:wikipedia": "tsx scripts/probe-wikipedia.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

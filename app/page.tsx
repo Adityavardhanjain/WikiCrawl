@@ -12,6 +12,7 @@ import { CrawlControls } from './components/CrawlControls';
 import { MemoizedSidebar } from './components/Sidebar';
 import { MemoizedNodeDetailPanel } from './components/NodeDetailPanel';
 import { usePathfinder } from './components/usePathfinder';
+import { exploreTopics } from '@/lib/exploreTopics';
 
 // Dynamically import GraphCanvas to avoid SSR issues with WebGL/Sigma
 const GraphCanvas = dynamic(
@@ -716,10 +717,10 @@ const handleCloseSelection = useCallback(() => {
                 </span>
               </Link>
               <div>
-                <h1 className="text-2xl font-bold">
+                <p className="app-brand-title text-2xl font-bold">
                   <span className="gradient-text">WikiCrawl</span>
                   <span className="text-white/90"> / field notes</span>
-                </h1>
+                </p>
                 <p className="text-sm text-cyan-400/80">A visual index of unexpected connections</p>
                 <p className="text-xs text-slate-400">
                   Created by{' '}
@@ -727,6 +728,10 @@ const handleCloseSelection = useCallback(() => {
                     Adityavardhan Jain
                   </a>
                 </p>
+                <nav className="home-discovery-nav" aria-label="WikiCrawl guides">
+                  <Link href="/explore">Explore topics</Link>
+                  <Link href="/learn">Learn how it works</Link>
+                </nav>
               </div>
             </div>
             
@@ -951,8 +956,8 @@ const handleCloseSelection = useCallback(() => {
                   <span>FIELD NOTE 001</span>
                   <span>WIKIPEDIA, MAPPED</span>
                 </div>
-                <h2 id="welcome-title">Follow an idea beyond its first link.</h2>
-                <p>Choose a Wikipedia article to see the pages, patterns, and unexpected connections around it.</p>
+                <h1 id="welcome-title">Explore Wikipedia as a knowledge graph.</h1>
+                <p>WikiCrawl follows article links from a topic you choose, then maps the pages and connections in an interactive graph. Follow an idea beyond its first link and find a Wikipedia rabbit hole of your own.</p>
                 <div className="landing-examples" role="group" aria-label="Example topics">
                   <span className="landing-examples-label">Start with</span>
                   {exampleTopics.map((topic) => (
@@ -960,6 +965,23 @@ const handleCloseSelection = useCallback(() => {
                   ))}
                 </div>
                 <div className="landing-footnote"><span aria-hidden="true">↗</span> Search above to map any article</div>
+                <section className="home-discovery-content" aria-labelledby="popular-explorations-heading">
+                  <div>
+                    <p className="landing-examples-label">A quick tour</p>
+                    <h3>How the map takes shape</h3>
+                    <p>Choose an article, set a crawl depth, and WikiCrawl gathers a bounded sample of linked pages. The map preserves link direction and adds graph metrics for the pages in that sample.</p>
+                  </div>
+                  <div>
+                    <h3 id="popular-explorations-heading">Popular starting points</h3>
+                    <ul>
+                      {exploreTopics.slice(0, 6).map((topic) => (
+                        <li key={topic.slug}><Link href={`/explore/${topic.slug}`}>{topic.title}<span aria-hidden="true"> ↗</span></Link></li>
+                      ))}
+                    </ul>
+                    <Link className="home-all-topics" href="/explore">Browse all curated explorations ↗</Link>
+                  </div>
+                  <p className="home-rabbit-hole">Start with a <Link href="/learn/what-is-a-wikipedia-rabbit-hole">Wikipedia rabbit hole</Link>, or read <Link href="/learn/how-wikicrawl-works">how WikiCrawl works</Link>.</p>
+                </section>
               </section>
             </div>
           )}

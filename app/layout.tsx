@@ -5,10 +5,10 @@ import { Analytics } from '@vercel/analytics/next';
 import { SITE_ORIGIN, SITE_URL } from '@/lib/site';
 
 export const metadata: Metadata = {
-  title: 'WikiCrawl: Explore Wikipedia Connections',
+  title: 'WikiCrawl — Explore Wikipedia as an Interactive Knowledge Graph',
   metadataBase: SITE_URL,
   applicationName: 'WikiCrawl',
-  description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, map connected topics, and discover unexpected connections with WikiCrawl.',
+  description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, discover unexpected connections, and find your next Wikipedia rabbit hole with WikiCrawl.',
   keywords: [
     'Wikipedia graph',
     'Wikipedia link explorer',
@@ -38,8 +38,8 @@ export const metadata: Metadata = {
     type: 'website',
     siteName: 'WikiCrawl',
     url: SITE_ORIGIN,
-    title: 'WikiCrawl: Explore Wikipedia Connections',
-    description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, map connected topics, and discover unexpected connections.',
+    title: 'WikiCrawl — Explore Wikipedia as an Interactive Knowledge Graph',
+    description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, discover unexpected connections, and find your next Wikipedia rabbit hole.',
     locale: 'en_US',
     images: [
       {
@@ -52,8 +52,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'WikiCrawl: Explore Wikipedia Connections',
-    description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, map connected topics, and discover unexpected connections.',
+    title: 'WikiCrawl — Explore Wikipedia as an Interactive Knowledge Graph',
+    description: 'Explore Wikipedia as an interactive knowledge graph. Follow article links, discover unexpected connections, and find your next Wikipedia rabbit hole.',
     images: ['/twitter-image'],
   },
 };

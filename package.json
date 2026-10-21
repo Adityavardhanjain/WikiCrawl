@@ -28,7 +28,7 @@
     "graphology-shortest-path": "^2.1.0",
     "graphology-utils": "^2.5.2",
     "nanoid": "^5.0.7",
-    "next": "16.3.5",
+    "next": "16.4.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sigma": "^3.0.0"

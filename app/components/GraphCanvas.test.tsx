@@ -2,9 +2,10 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { CrawlResult } from '@/types/graph';
 import { GraphCanvas } from './GraphCanvas';
+import * as shareGraph from '@/lib/shareGraph';
 
 const cameraReset = vi.hoisted(() => vi.fn());
 const sigmaHandlers = vi.hoisted(() => new Map<string, (...args: unknown[]) => void>());
@@ -44,7 +45,7 @@ vi.mock('./useForceLayout', () => ({
   seedInitialPositions: () => new Map(),
   useForceLayout: (_graph: unknown, options: { changeKey: string; newNodeIds: string[] }) => {
     forceLayoutCalls.push({ changeKey: options.changeKey, newNodeIds: [...options.newNodeIds] });
-    return { arranging: false, paused: false, togglePause: vi.fn() };
+    return { arranging: false, paused: false, ready: true, togglePause: vi.fn() };
   },
 }));
 
@@ -168,5 +169,26 @@ describe('GraphCanvas DOM ownership', () => {
 
     await waitFor(() => expect(forceLayoutCalls.at(-1)?.changeKey).toBe('A:2'));
     expect(forceLayoutCalls.at(-1)?.newNodeIds).toEqual(['C']);
+  });
+
+  it('only enables sharing for a completed graph and copies a snapshot link', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
+    const encode = vi.spyOn(shareGraph, 'encodeSharedGraph').mockResolvedValue('snapshot');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const props = { data: makeData(), colorMode: 'depth' as const, onNodeClick: vi.fn(), focusedNode: null, path: null, reduceEffects: true, shareSettings: { depth: 2, maxNodes: 150 } };
+    const { rerender } = render(<GraphCanvas {...props} isStreaming />);
+
+    expect(screen.getByRole('button', { name: 'Copy graph link' })).toBeDisabled();
+    rerender(<GraphCanvas {...props} isExpanding />);
+    expect(screen.getByRole('button', { name: 'Download graph screenshot' })).toBeDisabled();
+    rerender(<GraphCanvas {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy graph link' }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/#graph=snapshot')));
+    expect(encode).toHaveBeenCalledWith(expect.objectContaining({ depth: 2, maxNodes: 150, colorMode: 'depth' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Graph link copied.');
+    Reflect.deleteProperty(navigator, 'clipboard');
   });
 });

@@ -220,6 +220,55 @@ describe('NodeDetailPanel summary', () => {
     );
   });
 
+  it('imports clickstream counts and distinguishes missing directed links', async () => {
+    vi.spyOn(summaryModule, 'fetchSummary').mockReturnValue(new Promise(() => {}));
+    vi.spyOn(relationshipModule, 'fetchRelationship').mockReturnValue(new Promise(() => {}));
+    const source = makeNode({ id: 'Albert Einstein', title: 'Albert Einstein' });
+    const target = makeNode({ id: 'Theory of relativity', title: 'Theory of relativity' });
+    const data: CrawlResult = {
+      ...makeData(source),
+      nodes: [source, target],
+      edges: [{ source: source.id, target: target.id }, { source: target.id, target: source.id }],
+    };
+    const file = new File([], 'clickstream-enwiki-2026-01.tsv');
+    Object.defineProperty(file, 'stream', { value: () => new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('Albert_Einstein\tTheory_of_relativity\tlink\t1234\n'));
+        controller.close();
+      },
+    }) });
+
+    const { rerender } = render(
+      <MemoizedNodeDetailPanel node={source} data={data} onClose={vi.fn()} onExpand={vi.fn()} />,
+      { wrapper: createWrapper() },
+    );
+
+    fireEvent.click(screen.getByText('Clickstream data'));
+    fireEvent.change(screen.getByLabelText('Choose file'), { target: { files: [file] } });
+    expect(await screen.findByText(/1 matching directed links/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Explain connection: Albert Einstein to Theory of relativity, 1,234 visits' }));
+    expect(screen.getAllByText('1,234')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Explain connection: Theory of relativity to Albert Einstein' }));
+    expect(screen.getByText('Not reported in this file')).toBeInTheDocument();
+    const added = makeNode({ id: 'Physics', title: 'Physics' });
+    const expandedData = { ...data, nodes: [...data.nodes, added], edges: [...data.edges, { source: source.id, target: added.id }] };
+    rerender(<MemoizedNodeDetailPanel node={source} data={expandedData} onClose={vi.fn()} onExpand={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Explain connection: Albert Einstein to Physics' }));
+    expect(screen.getByText('Not included in this import; reimport to check')).toBeInTheDocument();
+  });
+
+  it('reveals connections beyond the initial six', () => {
+    vi.spyOn(summaryModule, 'fetchSummary').mockReturnValue(new Promise(() => {}));
+    const node = makeNode();
+    const targets = Array.from({ length: 7 }, (_, index) => makeNode({ id: `Page ${index}`, title: `Page ${index}` }));
+    const data: CrawlResult = { ...makeData(node), nodes: [node, ...targets], edges: targets.map((target) => ({ source: node.id, target: target.id })) };
+
+    render(<MemoizedNodeDetailPanel node={node} data={data} onClose={vi.fn()} onExpand={vi.fn()} />, { wrapper: createWrapper() });
+    expect(screen.queryByRole('button', { name: 'Explain connection: Quantum mechanics to Page 6' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 7 connections' }));
+    expect(screen.getByRole('button', { name: 'Explain connection: Quantum mechanics to Page 6' })).toBeInTheDocument();
+  });
+
   it('shows See also as context without claiming a specific relationship', async () => {
     vi.spyOn(summaryModule, 'fetchSummary').mockResolvedValue({
       extract: 'An example article.',

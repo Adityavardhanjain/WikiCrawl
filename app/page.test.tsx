@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { WikiNode } from '@/types/graph';
+import * as shareGraph from '@/lib/shareGraph';
 vi.mock('./components/useNodeSummary', () => ({
   useNodeSummary: () => ({
     data: {
@@ -106,6 +107,7 @@ describe('Home live crawl streaming', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
 function runPendingFrames() {
@@ -173,6 +175,22 @@ function runPendingFrames() {
     await waitFor(() => expect(crawlChannels).toHaveLength(1));
 
     expect(screen.getByRole('button', { name: 'Explore article' })).toBeDisabled();
+  });
+
+  it('opens a shared graph without making a crawl request', async () => {
+    window.history.replaceState({}, '', '/#graph=snapshot');
+    vi.spyOn(shareGraph, 'decodeSharedGraph').mockResolvedValue({
+      graph: { id: 'shared', seedId: 'Alpha', nodes: [makeNode('Alpha')], edges: [], communities: [], crawledAt: '', positions: { Alpha: { x: 1, y: 2 } } },
+      depth: 1,
+      maxNodes: 50,
+      colorMode: 'depth',
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><Home /></QueryClientProvider>);
+
+    expect(await screen.findByText('Crawl complete: 1 pages found')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Depth' })).toHaveAttribute('aria-pressed', 'true');
+    expect(crawlChannels).toHaveLength(0);
   });
 
   it('exposes the WikiCrawl mark as a home link', () => {

@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic';
 import type { Community, CrawlResult, WikiEdge, WikiNode, PathResult } from '@/types/graph';
 import { createCrawlRequest, getCrawlPayload, parseCrawlParams, buildExpandRequestBody, type CrawlRequest } from '@/lib/crawlRequest';
 import { mergeGraphData } from '@/lib/graphSync';
+import { decodeSharedGraph } from '@/lib/shareGraph';
 import { SeedSearch } from './components/SeedSearch';
 import { CrawlControls } from './components/CrawlControls';
 import { MemoizedSidebar } from './components/Sidebar';
@@ -223,6 +224,8 @@ export default function Home() {
   const [crawlStage, setCrawlStage] = useState<'crawling' | 'analyzing'>('crawling');
   const previousDataRef = useRef<CrawlResult | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
+  const [sharedGraphLoading, setSharedGraphLoading] = useState(false);
+  const [sharedGraphError, setSharedGraphError] = useState<string | null>(null);
   const [crawlWarning, setCrawlWarning] = useState<number | null>(null);
   const [notFound, setNotFound] = useState<{ title: string; suggestions: string[] } | null>(null);
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
@@ -489,6 +492,7 @@ export default function Home() {
     previousDataRef.current = data ?? liveData;
     const request = createCrawlRequest(title, depth, maxNodes, ++requestNonceRef.current);
     const url = new URL(window.location.href);
+    url.hash = '';
     url.searchParams.set('seed', title);
     url.searchParams.set('depth', request.depth.toString());
     url.searchParams.set('nodes', request.maxNodes.toString());
@@ -506,6 +510,8 @@ export default function Home() {
     setGraphError(null);
     setCrawlWarning(null);
     setNotFound(null);
+    setSharedGraphError(null);
+    setSharedGraphLoading(false);
     setSelectedNodeId(null);
     setFocusedNode(null);
     setPathSelection(null);
@@ -526,6 +532,7 @@ export default function Home() {
     queryClient.removeQueries({ queryKey: ['crawl'] });
 
     const url = new URL(window.location.href);
+    url.hash = '';
     url.searchParams.delete('seed');
     url.searchParams.delete('depth');
     url.searchParams.delete('nodes');
@@ -546,6 +553,8 @@ export default function Home() {
     setGraphError(null);
     setCrawlWarning(null);
     setNotFound(null);
+    setSharedGraphError(null);
+    setSharedGraphLoading(false);
     setSidebarVisible(true);
     setSidebarOpen(false);
   }, [queryClient]);
@@ -559,6 +568,7 @@ export default function Home() {
     setMaxNodes(nextMaxNodes);
     const request = createCrawlRequest(submittedRequest.seed, nextDepth, nextMaxNodes, ++requestNonceRef.current);
     const url = new URL(window.location.href);
+    url.hash = '';
     url.searchParams.set('depth', String(nextDepth));
     url.searchParams.set('nodes', String(nextMaxNodes));
     window.history.replaceState({}, '', url.toString());
@@ -660,6 +670,26 @@ const handleCloseSelection = useCallback(() => {
 
   // Load from URL params
   useEffect(() => {
+    const encoded = new URLSearchParams(window.location.hash.slice(1)).get('graph');
+    if (encoded !== null) {
+      const nonce = ++requestNonceRef.current;
+      setSharedGraphLoading(true);
+      void decodeSharedGraph(encoded).then((snapshot) => {
+        if (requestNonceRef.current !== nonce) return;
+        const request = createCrawlRequest(snapshot.graph.seedId, snapshot.depth, snapshot.maxNodes, nonce);
+        queryClient.setQueryData(['crawl', request.seed, request.depth, request.maxNodes, request.nonce], snapshot.graph);
+        submittedRequestRef.current = request;
+        setDepth(snapshot.depth);
+        setMaxNodes(snapshot.maxNodes);
+        setColorMode(snapshot.colorMode);
+        setSubmittedRequest(request);
+      }).catch((error: unknown) => {
+        if (requestNonceRef.current === nonce) setSharedGraphError(error instanceof Error ? error.message : 'Could not open this graph link.');
+      }).finally(() => {
+        if (requestNonceRef.current === nonce) setSharedGraphLoading(false);
+      });
+      return;
+    }
     const { seed, depth: urlDepth, maxNodes: urlMaxNodes } = parseCrawlParams(window.location.search);
     setDepth(urlDepth);
     setMaxNodes(urlMaxNodes);
@@ -672,7 +702,7 @@ const handleCloseSelection = useCallback(() => {
       setLiveData(createSeedPreview(seed));
       setSeedPreview(true);
     }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     if (!data) return;
@@ -718,8 +748,10 @@ const handleCloseSelection = useCallback(() => {
               </Link>
               <div>
                 <p className="app-brand-title text-2xl font-bold">
-                  <span className="gradient-text">WikiCrawl</span>
-                  <span className="text-white/90"> / field notes</span>
+                  <Link href="/" onNavigate={handleReturnHome}>
+                    <span className="gradient-text">WikiCrawl</span>
+                    <span className="text-white/90"> / field notes</span>
+                  </Link>
                 </p>
                 <p className="text-sm text-cyan-400/80">A visual index of unexpected connections</p>
                 <p className="text-xs text-slate-400">
@@ -895,6 +927,8 @@ const handleCloseSelection = useCallback(() => {
                 focusedCommunityId={focusedCommunityId}
                 path={pathSelection?.result ?? null}
                 isExpanded={expandedNodeIds.size > 0}
+                isExpanding={Boolean(expandingNodeId)}
+                shareSettings={submittedRequest && data && !error ? { depth: submittedRequest.depth, maxNodes: submittedRequest.maxNodes } : undefined}
               />
               
               <MemoizedNodeDetailPanel
@@ -949,8 +983,14 @@ const handleCloseSelection = useCallback(() => {
             </div>
           )}
 
-          {!displayData && !isLoading && !error && !notFound && (
-            <div className="absolute inset-0 flex items-center justify-center overflow-y-auto px-5 py-8">
+          {sharedGraphError && !displayData && (
+            <div className="absolute inset-0 flex items-center justify-center px-5" role="alert">
+              <p className="text-center text-amber-200">{sharedGraphError}</p>
+            </div>
+          )}
+
+          {!displayData && !isLoading && !error && !notFound && !sharedGraphLoading && !sharedGraphError && (
+            <div className="home-empty-scroll absolute inset-0 flex items-center justify-center overflow-y-auto px-5 py-8">
               <section className="atlas-empty-state" aria-labelledby="welcome-title">
                 <div className="landing-index-line">
                   <span>FIELD NOTE 001</span>

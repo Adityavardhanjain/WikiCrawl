@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useQuery } from '@tanstack/react-query';
 import type { WikiNode, CrawlResult, PathResult, WikiEdge } from '@/types/graph';
 import { buildAdjacency } from '@/lib/adjacency';
+import { clickstreamEdgeKey, readClickstream, type ClickstreamCounts } from '@/lib/clickstream';
 import { fetchRelationship } from '@/lib/relationshipClient';
 import { useNodeSummary } from './useNodeSummary';
 
@@ -37,6 +38,11 @@ function NodeDetailPanel({
   const [pathQuery, setPathQuery] = useState('');
   const [highlightedPathOption, setHighlightedPathOption] = useState(0);
   const [selectedConnection, setSelectedConnection] = useState<WikiEdge | null>(null);
+  const [showAllConnections, setShowAllConnections] = useState(false);
+  const [clickstream, setClickstream] = useState<{ seedId: string; name: string; counts: ClickstreamCounts; edgeKeys: Set<string> } | null>(null);
+  const [clickstreamLoading, setClickstreamLoading] = useState(false);
+  const [clickstreamError, setClickstreamError] = useState<string | null>(null);
+  const clickstreamRequestRef = useRef(0);
   const connectionSectionRef = useRef<HTMLDivElement>(null);
   const connectedNodes = useMemo(() => {
     if (!node || !data) return [];
@@ -48,7 +54,7 @@ function NodeDetailPanel({
 
   const connectionEdges = useMemo(() => {
     if (!node || !data) return [];
-    return data.edges.filter((edge) => edge.source === node.id || edge.target === node.id).slice(0, 6);
+    return data.edges.filter((edge) => edge.source === node.id || edge.target === node.id);
   }, [data, node]);
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useNodeSummary(node?.id ?? null);
@@ -73,11 +79,43 @@ function NodeDetailPanel({
     setPathQuery('');
     setHighlightedPathOption(0);
     setSelectedConnection(null);
+    setShowAllConnections(false);
   }, [node?.id]);
 
   useEffect(() => {
     setHighlightedPathOption((current) => Math.min(current, Math.max(pathOptions.length - 1, 0)));
   }, [pathOptions.length]);
+
+  useEffect(() => {
+    clickstreamRequestRef.current += 1;
+    setClickstream(null);
+    setClickstreamLoading(false);
+    setClickstreamError(null);
+  }, [data?.seedId]);
+
+  const importClickstream = async (file: File) => {
+    if (!data) return;
+    const request = ++clickstreamRequestRef.current;
+    setClickstreamLoading(true);
+    setClickstreamError(null);
+    try {
+      let stream = file.stream();
+      if (file.name.toLowerCase().endsWith('.gz')) {
+        if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot open gzip files. Unzip the file and select the TSV instead.');
+        stream = stream.pipeThrough(new DecompressionStream('gzip'));
+      }
+      const counts = await readClickstream(stream, data.nodes, data.edges);
+      if (clickstreamRequestRef.current === request) {
+        setClickstream({ seedId: data.seedId, name: file.name, counts, edgeKeys: new Set(data.edges.map((edge) => clickstreamEdgeKey(edge.source, edge.target))) });
+      }
+    } catch (error) {
+      if (clickstreamRequestRef.current === request) {
+        setClickstreamError(error instanceof Error ? error.message : 'Could not read the clickstream file.');
+      }
+    } finally {
+      if (clickstreamRequestRef.current === request) setClickstreamLoading(false);
+    }
+  };
 
   const choosePathTarget = (target: WikiNode) => {
     if (!node) return;
@@ -88,6 +126,10 @@ function NodeDetailPanel({
 
   if (!node || !data) return null;
 
+  const activeClickstream = clickstream?.seedId === data.seedId ? clickstream : null;
+  const selectedCount = selectedConnection && activeClickstream
+    ? activeClickstream.counts[clickstreamEdgeKey(selectedConnection.source, selectedConnection.target)]
+    : undefined;
   const community = data.communities.find(c => c.id === node.communityId);
   const contextLabel = relationshipQuery.data?.context === 'lead'
     ? 'Lead'
@@ -329,16 +371,17 @@ function NodeDetailPanel({
           <div id="node-connections" ref={connectionSectionRef}>
             <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2 tracking-wide">Connections</h4>
             <div className="space-y-1">
-              {connectionEdges.map((edge) => {
+              {(showAllConnections ? connectionEdges : connectionEdges.slice(0, 6)).map((edge) => {
                 const source = data.nodes.find((candidate) => candidate.id === edge.source);
                 const target = data.nodes.find((candidate) => candidate.id === edge.target);
                 if (!source || !target) return null;
                 const isSelected = selectedConnection?.source === edge.source && selectedConnection?.target === edge.target;
+                const count = activeClickstream?.counts[clickstreamEdgeKey(edge.source, edge.target)];
                 return (
                   <button
                     key={`${edge.source}|${edge.target}`}
                     type="button"
-                    aria-label={`Explain connection: ${source.title} to ${target.title}`}
+                    aria-label={`Explain connection: ${source.title} to ${target.title}${count === undefined ? '' : `, ${count.toLocaleString()} visits`}`}
                     aria-pressed={isSelected}
                     onClick={() => setSelectedConnection(edge)}
                     className={`block min-h-11 w-full truncate rounded-lg px-2 py-2 text-left text-xs transition ${
@@ -348,12 +391,46 @@ function NodeDetailPanel({
                     <span className="font-medium">{source.title}</span>
                     <span className="px-1.5 text-slate-500" aria-hidden="true">→</span>
                     <span className="font-medium">{target.title}</span>
+                    {count !== undefined && <span className="ml-2 text-cyan-200">{count.toLocaleString()}</span>}
                   </button>
                 );
               })}
             </div>
+            {connectionEdges.length > 6 && (
+              <button type="button" className="min-h-11 px-2 text-xs text-cyan-200 underline" onClick={() => setShowAllConnections((shown) => !shown)}>
+                {showAllConnections ? 'Show fewer connections' : `Show all ${connectionEdges.length} connections`}
+              </button>
+            )}
           </div>
         )}
+
+        <details className="clickstream-import">
+          <summary>Clickstream data {activeClickstream ? <span>Loaded</span> : null}</summary>
+          <p>Import an English Wikipedia monthly clickstream TSV or TSV.GZ. The file stays in your browser.</p>
+          <a href="https://dumps.wikimedia.org/other/clickstream/" target="_blank" rel="noopener noreferrer">Wikimedia clickstream downloads</a>
+          <label className="clickstream-file-label">
+            {clickstreamLoading ? 'Reading file...' : activeClickstream ? 'Replace file' : 'Choose file'}
+            <input
+              type="file"
+              accept=".tsv,.gz,.txt,text/tab-separated-values,application/gzip"
+              disabled={clickstreamLoading}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = '';
+                if (file) void importClickstream(file);
+              }}
+            />
+          </label>
+          <div aria-live="polite">
+            {clickstreamError && <p className="clickstream-error">{clickstreamError}</p>}
+            {activeClickstream && (
+              <p>{activeClickstream.name}: {Object.keys(activeClickstream.counts).length.toLocaleString()} matching directed links.
+                {data.edges.some((edge) => !activeClickstream.edgeKeys.has(clickstreamEdgeKey(edge.source, edge.target))) && ' Reimport to include newly added links.'}
+              </p>
+            )}
+          </div>
+          <p>Counts of 10 or fewer are omitted by Wikimedia; missing records are not zero.</p>
+        </details>
 
         {selectedConnection && (
           <section
@@ -371,6 +448,15 @@ function NodeDetailPanel({
                 Back to connections
               </button>
             </div>
+            {activeClickstream && (
+              <div className="clickstream-count">
+                <h5>Monthly page-to-page visits</h5>
+                <p>{selectedConnection && !activeClickstream.edgeKeys.has(clickstreamEdgeKey(selectedConnection.source, selectedConnection.target))
+                  ? 'Not included in this import; reimport to check'
+                  : selectedCount === undefined ? 'Not reported in this file' : selectedCount.toLocaleString()}</p>
+                <span>{activeClickstream.name}</span>
+              </div>
+            )}
             {relationshipQuery.isLoading ? (
               <p className="text-xs text-slate-400">Checking the Wikipedia passage…</p>
             ) : relationshipQuery.isError ? (

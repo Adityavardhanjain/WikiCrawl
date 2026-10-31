@@ -24,7 +24,7 @@ interface UseForceLayoutOptions {
 export function useForceLayout(
   graph: Graph,
   { seedId, changeKey, newNodeIds, enabled = true, relayoutAll = false, onLayoutStop }: UseForceLayoutOptions,
-): { arranging: boolean; paused: boolean; togglePause: () => void } {
+): { arranging: boolean; paused: boolean; ready: boolean; togglePause: () => void } {
   const layoutRef = useRef<FA2Layout | null>(null);
   const seedRef = useRef<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -32,6 +32,7 @@ export function useForceLayout(
   const onLayoutStopRef = useRef(onLayoutStop);
   const [arranging, setArranging] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [settledKey, setSettledKey] = useState<string | null>(null);
 
   newNodeIdsRef.current = newNodeIds;
   onLayoutStopRef.current = onLayoutStop;
@@ -45,6 +46,8 @@ export function useForceLayout(
       setArranging(false);
       return;
     }
+
+    setSettledKey(null);
 
     const isNewSeed = seedRef.current !== seedId;
     seedRef.current = seedId;
@@ -85,6 +88,7 @@ export function useForceLayout(
         ));
         setArranging(false);
         onLayoutStopRef.current?.();
+        setSettledKey(changeKey);
       }, 1800);
     }, 80);
 
@@ -109,5 +113,5 @@ export function useForceLayout(
     }
   };
 
-  return { arranging, paused, togglePause };
+  return { arranging, paused, ready: enabled && settledKey === changeKey, togglePause };
 }

@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Graph from 'graphology';
 import { Sigma } from 'sigma';
 import { EdgeArrowProgram, EdgeLineProgram } from 'sigma/rendering';
+import { Download, Link as LinkIcon } from 'lucide-react';
 import type { CrawlResult, WikiNode, PathResult } from '@/types/graph';
 import { getFocusCameraTarget } from '@/lib/cameraFocus';
 import { getCommunityColor, getNodeSize, hslToRgbColor } from '@/lib/graphAnalysis';
 import { syncGraphData } from '@/lib/graphSync';
 import { computeRobustBounds } from '@/lib/layoutMetrics';
 import { seedInitialPositions } from '@/lib/layoutSeed';
+import { encodeSharedGraph } from '@/lib/shareGraph';
 import { getRememberedPositions, useForceLayout } from './useForceLayout';
 import { useNodeSummary, usePrefetchNodeSummary } from './useNodeSummary';
 
@@ -33,6 +35,8 @@ interface GraphCanvasProps {
   isExpanded?: boolean;
   focusedCommunityId?: number | null;
   reduceEffects?: boolean;
+  shareSettings?: { depth: number; maxNodes: number };
+  isExpanding?: boolean;
 }
 
 export function GraphCanvas({
@@ -46,6 +50,8 @@ export function GraphCanvas({
   isExpanded = false,
   focusedCommunityId = null,
   reduceEffects = false,
+  shareSettings,
+  isExpanding = false,
 }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef(new Graph({ type: 'directed', multi: false }));
@@ -88,6 +94,10 @@ export function GraphCanvas({
   const [containerReady, setContainerReady] = useState(false);
   const [showAllEdges, setShowAllEdges] = useState(false);
   const [showArrows, setShowArrows] = useState(false);
+  const [arrivalsActive, setArrivalsActive] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareMessage, setShareMessage] = useState('');
+  const [manualLink, setManualLink] = useState('');
   const [communityLabels, setCommunityLabels] = useState<Array<{
     id: number;
     label: string;
@@ -507,7 +517,9 @@ export function GraphCanvas({
     const wasEmpty = graph.order === 0;
     const seedChanged = graph.order > 0 && graph.getAttribute('seedId') !== data.seedId;
     const positions = wasEmpty || seedChanged
-      ? getRememberedPositions(data.seedId) ?? seedInitialPositions(data.nodes, data.seedId)
+      ? data.id === 'shared' && Object.keys(data.positions).length > 0
+        ? new Map(Object.entries(data.positions))
+        : getRememberedPositions(data.seedId) ?? seedInitialPositions(data.nodes, data.seedId)
       : undefined;
     const result = syncGraphData(graph, data, {
       initialPositions: positions,
@@ -525,6 +537,7 @@ export function GraphCanvas({
         }
       });
       if (nodeArrivalsRef.current.size > 0 && nodeArrivalFrameRef.current === null) {
+        setArrivalsActive(true);
         const refreshArrivals = () => {
           const now = performance.now();
           for (const [nodeId, arrival] of nodeArrivalsRef.current) {
@@ -536,6 +549,7 @@ export function GraphCanvas({
           nodeArrivalFrameRef.current = nodeArrivalsRef.current.size > 0
             ? window.requestAnimationFrame(refreshArrivals)
             : null;
+          if (nodeArrivalsRef.current.size === 0) setArrivalsActive(false);
         };
         nodeArrivalFrameRef.current = window.requestAnimationFrame(refreshArrivals);
       }
@@ -569,11 +583,12 @@ export function GraphCanvas({
     }
   }, [applyRobustBounds, colorMode, containerReady, data, edgeCount, isStreaming, maxDegree, maxDepth, rankValues, reduceEffects]);
 
-  const { arranging, paused, togglePause } = useForceLayout(graphRef.current, {
+  const sharedLayout = data.id === 'shared' && layoutRevision <= 1;
+  const { arranging, paused, ready, togglePause } = useForceLayout(graphRef.current, {
     seedId: data.seedId,
     changeKey: `${data.seedId}:${layoutRevision}`,
     newNodeIds: pendingNewNodeIdsRef.current,
-    enabled: !isStreaming,
+    enabled: !isStreaming && !sharedLayout,
     relayoutAll: false,
     onLayoutStop: applyRobustBounds,
   });
@@ -690,6 +705,75 @@ export function GraphCanvas({
     sigmaRef.current?.refresh();
   };
 
+  const canShare = Boolean(shareSettings && sigmaRef.current && !isStreaming && !isExpanding && !arrivalsActive && (ready || sharedLayout));
+
+  const copyShareLink = async () => {
+    if (!shareSettings || !canShare) return;
+    setShareBusy(true);
+    setShareMessage('');
+    setManualLink('');
+    try {
+      const positions = Object.fromEntries(graphRef.current.nodes().map((id) => {
+        const attributes = graphRef.current.getNodeAttributes(id);
+        return [id, { x: Number(attributes.x), y: Number(attributes.y) }];
+      }));
+      const encoded = await encodeSharedGraph({ graph: { ...data, positions }, ...shareSettings, colorMode });
+      const url = new URL(window.location.pathname, window.location.origin);
+      url.hash = `graph=${encoded}`;
+      const link = url.toString();
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(link);
+        setShareMessage('Graph link copied.');
+      } catch {
+        setManualLink(link);
+        setShareMessage('Copy the graph link below.');
+      }
+    } catch (error) {
+      setShareMessage(error instanceof Error ? error.message : 'Could not create a graph link.');
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const downloadScreenshot = () => {
+    const sigma = sigmaRef.current;
+    if (!sigma || !canShare) return;
+    setShareMessage('');
+    try {
+      sigma.refresh();
+      const layers = sigma.getCanvases();
+      const orderedLayers = ['edges', 'edgeLabels', 'nodes', 'labels', 'hovers', 'hoverNodes'];
+      const source = layers.nodes;
+      if (!source?.width || !source.height) throw new Error('The graph is not ready to capture.');
+      const canvas = document.createElement('canvas');
+      canvas.width = source.width;
+      canvas.height = source.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Could not create a screenshot.');
+      context.fillStyle = '#121a16';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      for (const layer of orderedLayers) {
+        if (layers[layer]) context.drawImage(layers[layer], 0, 0, canvas.width, canvas.height);
+      }
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          setShareMessage('Could not create a screenshot.');
+          return;
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = `wikicrawl-${data.seedId.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80) || 'graph'}.png`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        setShareMessage('Screenshot downloaded.');
+      }, 'image/png');
+    } catch (error) {
+      setShareMessage(error instanceof Error ? error.message : 'Could not create a screenshot.');
+    }
+  };
+
   return (
     <div className="relative w-full h-full min-h-[320px]">
       <div ref={containerRef} className="graph-surface absolute inset-0 w-full h-full" />
@@ -712,6 +796,17 @@ export function GraphCanvas({
           {showArrows ? 'Arrows on' : 'Arrows'}
         </button>
       </div>
+
+      {shareSettings && (
+        <div className="graph-share" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+          <div className="graph-share-actions graph-overlay" role="group" aria-label="Share graph">
+            <button type="button" className="graph-control" aria-label="Copy graph link" title="Copy graph link" disabled={!canShare || shareBusy} onClick={() => void copyShareLink()}><LinkIcon size={17} aria-hidden="true" /></button>
+            <button type="button" className="graph-control" aria-label="Download graph screenshot" title="Download graph screenshot" disabled={!canShare || shareBusy} onClick={downloadScreenshot}><Download size={17} aria-hidden="true" /></button>
+          </div>
+          {shareMessage && <p className="graph-share-message" role="status">{shareMessage}</p>}
+          {manualLink && <textarea aria-label="Graph link to copy" className="graph-share-link" readOnly value={manualLink} onFocus={(event) => event.currentTarget.select()} />}
+        </div>
+      )}
 
       {(arranging || paused) && (
         <div

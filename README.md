@@ -24,11 +24,17 @@ Starting from a Wikipedia article, WikiCrawl follows outgoing links up to a conf
 * **Community and depth coloring:** Color nodes by detected community or distance from the starting article.
 * **Page inspection:** Select a node to explore its summary, graph metrics, community assignment, and connected pages.
 * **Relationship context:** Inspect a directed connection on demand to see WikiCrawl's interpretation, whether Wikipedia establishes the link in the lead, article body, or See also section, and the supporting source passage when available.
+* **Clickstream data:** Import a monthly English Wikipedia clickstream file locally and inspect reported navigation counts for directed links in the current graph.
+* **Share and export:** Copy a link containing the completed graph or download a PNG of the current graph view after it finishes arranging.
 * **Incremental expansion:** Crawl outward from a selected page and merge newly discovered pages into the existing graph.
 * **Deeper exploration:** Restart from the original seed with a greater crawl depth and a chosen page limit.
 * **Shortest-path discovery:** Find a shortest route between pages already present in the graph.
 
 Graph metrics and community assignments are calculated over the crawled subgraph, not the entirety of Wikipedia. Although crawl edges preserve link direction, shortest-path search treats connections as undirected.
+
+To use clickstream data, download an English Wikipedia monthly `clickstream-enwiki` TSV.GZ file from [Wikimedia's clickstream dumps](https://dumps.wikimedia.org/other/clickstream/). Select a page in the graph, open **Clickstream data** in its details, and choose the file. The file is streamed locally in the browser; it is not uploaded or persisted. Inspect a connection to see its reported monthly count. Wikimedia excludes pairs with 10 or fewer observations, so an absent count is not necessarily zero. Only links in the graph at import time are matched; import again after expanding the graph. Gzip support requires a browser with `DecompressionStream`, or the file can be decompressed before importing.
+
+Once the graph finishes arranging, use the graph's link and download buttons to copy a self-contained snapshot link or save the current graph view as a PNG. Links include the graph, positions and color mode, including expansions, but not locally imported clickstream data or the current selection. They do not rely on server storage. Browsers must support gzip compression streams, and some graphs are too large for a link; in that case, use the screenshot instead. Long links may also be truncated by some messaging services.
 
 ## Architecture
 

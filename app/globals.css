@@ -1226,6 +1226,12 @@ body { color: var(--paper); }
 .graph-control:hover { background: rgba(119, 201, 189, 0.13); color: var(--paper); transform: translateY(-1px); }
 .graph-control:active { transform: translateY(0); }
 .graph-control-wide { min-width: 3.1rem; font: 500 0.68rem var(--font-display), sans-serif; }
+.graph-share { position: absolute; right: 1rem; bottom: 1rem; z-index: 20; display: flex; max-width: min(22rem, calc(100% - 2rem)); flex-direction: column; align-items: flex-end; gap: 0.4rem; }
+.graph-share-actions { display: flex; gap: 0.15rem; padding: 0.2rem; }
+.graph-share-actions .graph-control { display: grid; width: 2.75rem; height: 2.75rem; place-items: center; }
+.graph-share-actions .graph-control:disabled { cursor: not-allowed; opacity: 0.45; }
+.graph-share-message { max-width: 100%; padding: 0.5rem 0.65rem; border: 1px solid var(--line); border-radius: 4px; background: var(--atlas-surface); color: var(--paper); font-size: 0.72rem; line-height: 1.4; }
+.graph-share-link { width: min(20rem, calc(100vw - 2rem)); height: 4.5rem; padding: 0.5rem; border: 1px solid var(--signal-cool); border-radius: 4px; background: var(--atlas-surface-deep); color: var(--paper); font-size: 0.7rem; }
 
 .graph-legend { width: min(17rem, calc(100vw - 2rem)); max-height: min(44vh, 25rem); overflow-y: auto; padding: 0.9rem; }
 .graph-legend > div:first-child { margin-bottom: 0.75rem; color: var(--paper); font-size: 0.78rem; }
@@ -1313,6 +1319,19 @@ body { color: var(--paper); }
 .node-explore-hint { margin-top: 0.4rem; color: var(--atlas-muted); font-size: 0.65rem; line-height: 1.35; }
 .node-path-picker { position: relative; margin-top: 0.55rem; }
 .node-detail-content { flex: 1 1 auto; min-height: 0; }
+.clickstream-import { border-top: 1px solid var(--line); padding-top: 0.75rem; color: var(--paper-dim); font-size: 0.75rem; line-height: 1.5; }
+.clickstream-import summary { min-height: 2.5rem; cursor: pointer; color: var(--paper); font-weight: 600; }
+.clickstream-import summary span { margin-left: 0.4rem; color: var(--signal-cool); font-size: 0.65rem; }
+.clickstream-import p { margin: 0.5rem 0; overflow-wrap: anywhere; }
+.clickstream-import a { display: inline-block; color: var(--signal-cool); text-decoration: underline; }
+.clickstream-file-label { display: flex; width: fit-content; min-height: 2.75rem; align-items: center; margin-top: 0.75rem; padding: 0.4rem 0.75rem; border: 1px solid rgba(119, 201, 189, 0.4); border-radius: 4px; color: var(--paper); cursor: pointer; }
+.clickstream-file-label:focus-within { outline: 2px solid var(--signal-cool); outline-offset: 2px; }
+.clickstream-file-label input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.clickstream-import .clickstream-error { color: #fbbf24; }
+.clickstream-count { border-top: 1px solid var(--line); padding-top: 0.75rem; overflow-wrap: anywhere; }
+.clickstream-count h5 { color: var(--paper-dim); font-size: 0.65rem; text-transform: uppercase; }
+.clickstream-count p { margin-top: 0.25rem; color: var(--paper); font-size: 0.875rem; font-weight: 600; }
+.clickstream-count span { color: var(--atlas-muted); font-size: 0.65rem; }
 .node-tooltip {
   max-width: min(20rem, calc(100vw - 2rem));
   border: 1px solid rgba(119, 201, 189, 0.3);
@@ -1400,6 +1419,8 @@ body { color: var(--paper); }
   .header-inner { max-width: none; }
   .header-topline { min-height: 2.5rem; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
   .app-brand { gap: 0.65rem; }
+  .app-brand > div:last-child > p:not(.app-brand-title),
+  .app-brand-title .text-white\/90 { display: none; }
   .app-brand-mark { width: 2.2rem; height: 2.2rem; }
   .app-brand h1 { font-size: 0.95rem; }
   .app-brand p { margin-top: 0.1rem; font-size: 0.62rem; }
@@ -1416,9 +1437,10 @@ body { color: var(--paper); }
   .crawl-control-panel { padding: 0.55rem 0.6rem 0.45rem; }
   .crawl-deeper-button { grid-column: 1 / -1; width: 100%; }
   .graph-toolbar { top: 0.55rem; right: 0.55rem; left: auto; max-width: calc(100vw - 1.1rem); flex-wrap: nowrap; justify-content: flex-end; gap: 0.1rem; padding: 0.2rem; }
-  .graph-toolbar .graph-control { min-width: 1.85rem; height: 1.9rem; padding-inline: 0.3rem; font-size: 0.66rem; }
+  .graph-toolbar .graph-control { min-width: 2rem; height: 2.75rem; padding-inline: 0.3rem; font-size: 0.66rem; }
   .graph-toolbar .graph-control-wide { min-width: 2.25rem; }
-  .graph-legend { top: auto; bottom: 0.7rem; left: 0.65rem; display: flex; align-items: center; gap: 0.8rem; width: max-content; max-width: calc(100vw - 1.3rem); max-height: none; overflow: hidden; padding: 0.45rem 0.6rem; }
+  .graph-share { right: 0.65rem; bottom: 4.2rem; }
+  .graph-legend { top: auto; bottom: 4.2rem; left: 0.65rem; display: flex; align-items: center; gap: 0.8rem; width: max-content; max-width: calc(100vw - 1.3rem); max-height: none; overflow: hidden; padding: 0.45rem 0.6rem; }
   .graph-legend > div:first-child,
   .graph-legend > div:not(:first-child):not(:nth-child(2)):not(:last-child) { display: none; }
   .graph-legend > div:nth-child(2),
@@ -1439,6 +1461,7 @@ body { color: var(--paper); }
   .creation-card-mark { top: 1.5rem; right: 1.5rem; }
   .creation-meta { flex-direction: row; align-items: center; gap: 0.7rem; font-size: 0.66rem; }
   .atlas-empty-state { padding: 0.75rem 1rem; }
+  .home-empty-scroll { align-items: flex-start; }
   .atlas-empty-state > div:first-child { width: 3.25rem; height: 3.25rem; margin-bottom: 1rem; }
   .atlas-empty-state > div:first-child svg { width: 2.25rem; height: 2.25rem; }
   .atlas-empty-state h2 { margin-bottom: 0.5rem; font-size: 1.2rem; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
@@ -1451,8 +1474,10 @@ body { color: var(--paper); }
 
 @media (max-width: 380px) {
   .app-header { padding-inline: 0.7rem; }
-  .header-topline { flex-wrap: wrap; row-gap: 0.45rem; }
-  .app-brand { flex: 1 1 100%; width: 100%; }
+  .header-topline { flex-wrap: nowrap; row-gap: 0.45rem; }
+  .app-brand { flex: 1 1 auto; min-width: 0; }
+  .app-home-link { display: none; }
+  .home-discovery-nav a { white-space: nowrap; }
   .app-brand h1 { font-size: 0.9rem; white-space: nowrap; }
   .app-brand p { font-size: 0.6rem; }
   .mode-switch { margin-left: auto; }
@@ -1648,6 +1673,7 @@ body { color: var(--paper); }
 
 @media (max-width: 700px) {
   .atlas-empty-state { padding-inline: 0; }
+  .atlas-empty-state > .landing-index-line:first-child { width: auto; height: auto; margin-bottom: 0; }
   .atlas-empty-state h1 { max-width: 22rem; margin-top: 1.2rem; font-size: 2rem; }
   .atlas-empty-state > p { font-size: 0.9rem; }
   .landing-examples { gap: 0.45rem; margin-top: 1.3rem; }
